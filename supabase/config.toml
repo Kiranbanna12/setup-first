@@ -1,0 +1,4 @@
+project_id = "bfhrfxthgghpwjyknelw"
+
+[functions.xrozen-ai]
+verify_jwt = true
