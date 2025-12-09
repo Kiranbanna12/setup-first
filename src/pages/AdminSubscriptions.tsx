@@ -146,9 +146,20 @@ export default function AdminSubscriptions() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="Subscription Management" description="Manage user subscriptions">
+        <Card className="shadow-elegant">
+          <CardHeader>
+            <div className="h-6 w-40 bg-muted/50 rounded animate-pulse" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-12 w-full bg-muted/30 rounded animate-pulse" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </AdminLayout>
     );
   }
 

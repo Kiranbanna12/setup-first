@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +18,7 @@ interface ActivityItem {
 }
 
 export function RecentActivity() {
+  const navigate = useNavigate();
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -94,6 +96,22 @@ export function RecentActivity() {
     }
   };
 
+  const handleActivityClick = (activity: ActivityItem) => {
+    switch (activity.type) {
+      case 'project':
+        navigate(`/projects/${activity.id}`);
+        break;
+      case 'approval':
+        navigate(`/projects/${activity.id}`);
+        break;
+      case 'deadline':
+        navigate(`/projects/${activity.id}`);
+        break;
+      default:
+        break;
+    }
+  };
+
   if (loading) {
     return (
       <Card className="shadow-elegant">
@@ -104,8 +122,17 @@ export function RecentActivity() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 sm:px-6">
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div className="space-y-2 sm:space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-start gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg border bg-card">
+                <div className="h-4 w-4 bg-muted/50 rounded animate-pulse mt-1" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-3/4 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-3 w-1/2 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-3 w-1/4 bg-muted/50 rounded animate-pulse" />
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -132,7 +159,8 @@ export function RecentActivity() {
               {activities.map((activity) => (
                 <div
                   key={activity.id}
-                  className="flex items-start gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg border bg-card hover:bg-[#f5f6f6] dark:hover:bg-[#202428] transition-colors"
+                  onClick={() => handleActivityClick(activity)}
+                  className="flex items-start gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg border bg-card hover:bg-[#f5f6f6] dark:hover:bg-[#202428] transition-colors cursor-pointer"
                 >
                   <div className="mt-0.5 sm:mt-1 flex-shrink-0">
                     {getActivityIcon(activity.type)}

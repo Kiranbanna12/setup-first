@@ -463,9 +463,43 @@ export default function AdminAPI() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="API Management" description="Manage API keys and AI model configurations">
+        <div className="max-w-7xl space-y-6">
+          <div className="flex justify-between">
+            <div className="h-10 w-40 bg-muted/50 rounded animate-pulse" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="shadow-elegant">
+                <CardHeader className="pb-2">
+                  <div className="h-4 w-28 bg-muted/50 rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-12 bg-muted/50 rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <div className="space-y-4">
+            <div className="h-6 w-48 bg-muted/50 rounded animate-pulse" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {[1, 2].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader>
+                    <div className="h-6 w-40 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-4 w-32 bg-muted/40 rounded animate-pulse mt-2" />
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {[1, 2, 3].map((j) => (
+                      <div key={j} className="h-4 w-full bg-muted/30 rounded animate-pulse" />
+                    ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </div>
+      </AdminLayout>
     );
   }
 

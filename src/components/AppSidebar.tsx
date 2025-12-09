@@ -73,13 +73,13 @@ const navItems: NavItem[] = [
     title: "Editors",
     url: "/editors",
     icon: UserCircle,
-    roles: ["client", "agency", "admin"],
+    roles: ["editor", "client", "agency", "admin"],
   },
   {
     title: "Clients",
     url: "/clients",
     icon: Users,
-    roles: ["editor", "agency", "admin"],
+    roles: ["editor", "client", "agency", "admin"],
   },
   {
     title: "Chat",
@@ -122,12 +122,15 @@ const navItems: NavItem[] = [
 
 // Cache for user data to avoid repeated fetches
 let cachedUserData: { userId: string; userRole: UserRole } | null = null;
+// Cache for chat unread count to persist across page changes
+let cachedChatUnread: number = 0;
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [userRole, setUserRole] = useState<UserRole | null>(cachedUserData?.userRole || null);
-  const [totalUnread, setTotalUnread] = useState(0);
+  // Initialize with cached value for instant display (no flicker!)
+  const [totalUnread, setTotalUnread] = useState(cachedChatUnread);
   const [userId, setUserId] = useState<string | null>(cachedUserData?.userId || null);
   const activeProjectRef = useRef<string | null>(null);
   const isOnChatPageRef = useRef<boolean>(false);
@@ -174,6 +177,11 @@ export function AppSidebar() {
       setShowUpgradeDialog(true);
     }
   }, [hasAccess, navigate]);
+
+  // Sync totalUnread to cache whenever it changes
+  useEffect(() => {
+    cachedChatUnread = totalUnread;
+  }, [totalUnread]);
 
   // Track current active chat project and if on chat page in refs for realtime callbacks
   useEffect(() => {
@@ -413,7 +421,10 @@ export function AppSidebar() {
     <>
       <Sidebar className="border-r bg-sidebar dark:bg-sidebar">
         <SidebarHeader className="border-b px-3 sm:px-4 lg:px-6 py-3 sm:py-4 bg-sidebar dark:bg-sidebar">
-          <h2 className="text-base sm:text-lg lg:text-xl font-bold gradient-text">Xrozen Workflow</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base sm:text-lg lg:text-xl font-bold gradient-text">Xrozen Workflow</h2>
+            <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 font-normal border-primary/30 text-primary/80">Beta</Badge>
+          </div>
         </SidebarHeader>
 
         <SidebarContent className="px-2 sm:px-3 bg-sidebar dark:bg-sidebar">
@@ -494,7 +505,7 @@ export function AppSidebar() {
             <span>Logout</span>
           </Button>
           <p className="text-xs text-muted-foreground text-center mt-2">
-            © 2025 Xrozen
+            © 2025 <a href="https://xrozen.com" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">Xrozen</a>
           </p>
         </SidebarFooter>
       </Sidebar>

@@ -218,56 +218,84 @@ export default function TransactionsTable() {
             <p className="text-xs text-muted-foreground mt-1">Transactions will appear here when payments are made</p>
           </div>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50">
-                  <TableHead className="font-semibold">Date</TableHead>
-                  <TableHead className="font-semibold">Type</TableHead>
-                  <TableHead className="font-semibold">Paid To</TableHead>
-                  <TableHead className="font-semibold">Description</TableHead>
-                  <TableHead className="font-semibold">Method</TableHead>
-                  <TableHead className="text-right font-semibold">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.map((transaction) => (
-                  <TableRow key={transaction.id} className="hover:bg-muted/30">
-                    <TableCell className="font-medium">
-                      {new Date(transaction.transaction_date).toLocaleDateString('en-IN', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric'
-                      })}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={getTypeColor(transaction.transaction_type)}>
-                        {transaction.transaction_type.charAt(0).toUpperCase() + transaction.transaction_type.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-medium">{getRecipientName(transaction)}</span>
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate">{transaction.description || '-'}</TableCell>
-                    <TableCell>
-                      {transaction.payment_method ? (
-                        <Badge variant="secondary" className="text-xs">
-                          {transaction.payment_method.toUpperCase()}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={`font-bold ${transaction.transaction_type === 'payment' ? 'text-success' : transaction.transaction_type === 'expense' ? 'text-destructive' : ''}`}>
-                        {transaction.transaction_type === 'expense' ? '-' : '+'}₹{Number(transaction.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                    </TableCell>
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="font-semibold">Date</TableHead>
+                    <TableHead className="font-semibold">Type</TableHead>
+                    <TableHead className="font-semibold">Paid To</TableHead>
+                    <TableHead className="font-semibold">Description</TableHead>
+                    <TableHead className="font-semibold">Method</TableHead>
+                    <TableHead className="text-right font-semibold">Amount</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {transactions.map((transaction) => (
+                    <TableRow key={transaction.id} className="hover:bg-muted/30">
+                      <TableCell className="font-medium">
+                        {new Date(transaction.transaction_date).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={getTypeColor(transaction.transaction_type)}>
+                          {transaction.transaction_type.charAt(0).toUpperCase() + transaction.transaction_type.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-medium">{getRecipientName(transaction)}</span>
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate">{transaction.description || '-'}</TableCell>
+                      <TableCell>
+                        {transaction.payment_method ? (
+                          <Badge variant="secondary" className="text-xs">
+                            {transaction.payment_method.toUpperCase()}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={`font-bold ${transaction.transaction_type === 'payment' ? 'text-success' : transaction.transaction_type === 'expense' ? 'text-destructive' : ''}`}>
+                          {transaction.transaction_type === 'expense' ? '-' : '+'}₹{Number(transaction.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="block md:hidden space-y-3">
+              {transactions.map((transaction) => (
+                <div key={transaction.id} className="border rounded-lg p-3 bg-card">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{getRecipientName(transaction)}</p>
+                      <p className="text-xs text-muted-foreground truncate">{transaction.description || '-'}</p>
+                    </div>
+                    <Badge variant="outline" className={`text-xs ml-2 flex-shrink-0 ${getTypeColor(transaction.transaction_type)}`}>
+                      {transaction.transaction_type.charAt(0).toUpperCase() + transaction.transaction_type.slice(1)}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {new Date(transaction.transaction_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                    </span>
+                    <span className={`font-bold ${transaction.transaction_type === 'payment' ? 'text-success' : transaction.transaction_type === 'expense' ? 'text-destructive' : ''}`}>
+                      {transaction.transaction_type === 'expense' ? '-' : '+'}₹{Number(transaction.amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

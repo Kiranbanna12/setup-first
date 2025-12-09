@@ -102,8 +102,19 @@ export function UpcomingDeadlines() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 sm:px-6">
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div className="space-y-2 sm:space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="p-3 sm:p-4 rounded-lg border bg-card">
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="h-5 w-3/4 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-5 w-16 bg-muted/50 rounded animate-pulse" />
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-4 w-20 bg-muted/50 rounded animate-pulse" />
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>

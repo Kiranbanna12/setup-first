@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, Plus, TrendingUp, DollarSign, Clock, Calendar } from "lucide-react";
+import { FileText, Plus, TrendingUp, DollarSign, Clock, Calendar, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -28,6 +28,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Invoice } from "@/components/invoices/InvoiceCard"; // Import generic type if needed, or define locally
+import { useSubscriptionLimits } from "@/hooks/useSubscriptionLimits";
 
 export default function Invoices() {
   const navigate = useNavigate();
@@ -86,131 +87,104 @@ export default function Invoices() {
       .select('*')
       .eq('id', user.id)
       .single();
-    if (profile) setUserProfile(profile);
+
+    // Fetch active subscription plan's user_category
+    const { data: activeSub } = await supabase
+      .from('user_subscriptions')
+      .select('plan_id, subscription_plans(user_category)')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Use subscription plan's user_category if available, otherwise fall back to profile
+    const planCategory = (activeSub?.subscription_plans as any)?.user_category;
+    const updatedProfile = {
+      ...profile,
+      // Override user_category with subscription plan's category if available
+      user_category: planCategory || profile?.user_category || 'editor'
+    };
+
+    if (updatedProfile) setUserProfile(updatedProfile);
   };
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // Load invoices
-      const { data: invoicesData, error: invoiceError } = await supabase
-        .from("invoices")
-        .select(`
-          *,
-          client:clients(full_name)
-        `)
-        .order("created_at", { ascending: false });
+      // Run all queries in parallel for faster loading
+      const [
+        invoicesResult,
+        clientsResult,
+        projectsResult,
+        transactionsResult,
+        editorsResult
+      ] = await Promise.all([
+        supabase.from("invoices").select(`*, client:clients(full_name)`).order("created_at", { ascending: false }),
+        supabase.from("clients").select("id, full_name"),
+        supabase.from("projects").select("*"),
+        supabase.from("transactions").select("invoice_id, amount, transaction_type").eq("transaction_type", "payment"),
+        supabase.from("editors").select("id, full_name")
+      ]);
 
-      // Note: Relation syntax depends on if FKs are detected perfectly. 
-      // If 'editors' table is joined on editor_id. 
-      // We'll try to fetch raw and map if relation join fails, but normally it works.
-      // Also editors table might use 'id' as PK.
+      const invoicesData = invoicesResult.data || [];
+      const clientsList = clientsResult.data || [];
+      const projectsData = projectsResult.data || [];
+      const transactionsData = transactionsResult.data || [];
+      const editorsData = editorsResult.data || [];
 
-      if (invoiceError) throw invoiceError;
-
-      // Load clients first for lookup
-      const { data: clientsData } = await supabase.from("clients").select("id, full_name");
-      const clientsList = clientsData || [];
       setClients(clientsList);
-
-      // Load projects to get client_id for invoices without direct client link
-      const { data: projectsData } = await supabase.from("projects").select("*");
-      setProjects(projectsData || []);
-
-      // Load all transactions for payment calculation
-      const { data: transactionsData } = await supabase
-        .from("transactions")
-        .select("invoice_id, amount, transaction_type")
-        .eq("transaction_type", "payment");
+      setProjects(projectsData);
+      setEditors(editorsData);
 
       // Map invoices with client lookup and calculated paid amounts
-      const mappedInvoices = (invoicesData || []).map(inv => {
+      const mappedInvoices = invoicesData.map(inv => {
         const totalAmount = Number(inv.total_amount || inv.amount || 0);
-
-        // Calculate paid amount from transactions
-        const invoicePayments = (transactionsData || [])
+        const invoicePayments = transactionsData
           .filter(t => t.invoice_id === inv.id)
           .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
         const paidAmount = invoicePayments;
         const remainingAmount = Math.max(0, totalAmount - paidAmount);
 
-        // Get client info - try multiple sources
         let clientInfo = inv.client;
-
-        // If no client from join, try looking up from clients array
         if (!clientInfo?.full_name && inv.client_id) {
           const foundClient = clientsList.find(c => c.id === inv.client_id);
-          if (foundClient) {
-            clientInfo = { full_name: foundClient.full_name };
-          }
+          if (foundClient) clientInfo = { full_name: foundClient.full_name };
         }
-
-        // If still no client, try to get from linked projects
         if (!clientInfo?.full_name && projectsData) {
           const linkedProject = projectsData.find(p => p.invoice_id === inv.id);
           if (linkedProject?.client_id) {
             const projectClient = clientsList.find(c => c.id === linkedProject.client_id);
-            if (projectClient) {
-              clientInfo = { full_name: projectClient.full_name };
-            }
+            if (projectClient) clientInfo = { full_name: projectClient.full_name };
           }
         }
 
-        return {
-          ...inv,
-          client: clientInfo,
-          paid_amount: paidAmount,
-          remaining_amount: remainingAmount
-        };
+        return { ...inv, client: clientInfo, paid_amount: paidAmount, remaining_amount: remainingAmount };
       });
 
       setInvoices(mappedInvoices);
 
-      // Load editors (for role-based filter)
-      const { data: editorsData } = await supabase.from("editors").select("id, full_name");
-      setEditors(editorsData || []);
-
-      // Load all projects that have an invoice_id (linked to invoices)
-      // We fetch projects separately and enrich with invoice data manually
-      // to avoid the foreign key join issue
-      const { data: allItemsData, error: itemsError } = await supabase
-        .from("projects")
-        .select("*")
-        .not('invoice_id', 'is', null);
-
-      if (itemsError) {
-        console.error("Error loading invoice items:", itemsError);
-      }
-
+      // Load invoice items
+      const { data: allItemsData } = await supabase.from("projects").select("*").not('invoice_id', 'is', null);
       if (allItemsData && invoicesData) {
-        // Create a map of invoices for quick lookup
         const invoiceMap = new Map(invoicesData.map(inv => [inv.id, inv]));
-
-        // Enrich items with invoice data
         const enrichedItems = allItemsData.map(item => {
           const invoice = invoiceMap.get(item.invoice_id);
-          return {
-            ...item,
-            invoice_month: invoice?.month,
-            invoice_status: invoice?.status,
-            client_id: invoice?.client_id || item.client_id,
-          };
+          // Derive month from invoice.month or fallback to created_at date
+          let invoiceMonth = invoice?.month;
+          if (!invoiceMonth && invoice?.created_at) {
+            invoiceMonth = new Date(invoice.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+          }
+          return { ...item, invoice_month: invoiceMonth, invoice_status: invoice?.status, client_id: invoice?.client_id || item.client_id };
         });
         setInvoiceItems(enrichedItems);
       }
 
-      // Extract unique months
       const months = [...new Set(mappedInvoices?.map(inv => inv.month).filter(Boolean) || [])];
       setAvailableMonths(months.sort().reverse());
-
-      // Set default month
       const currentMonthName = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
-      if (months.includes(currentMonthName)) {
-        setSelectedMonth(currentMonthName);
-      } else if (months.length > 0) {
-        setSelectedMonth(months[0]);
-      }
+      if (months.includes(currentMonthName)) setSelectedMonth(currentMonthName);
+      else if (months.length > 0) setSelectedMonth(months[0]);
 
     } catch (error) {
       console.error("Error loading data:", error);
@@ -280,7 +254,8 @@ export default function Invoices() {
       await generateInvoicePDF(
         invoice,
         projects?.map(p => ({ name: p.name, fee: p.fee })) || [],
-        clientName
+        clientName,
+        userProfile // Pass full user profile for FROM section
       );
       toast.success("PDF downloaded successfully");
     } catch (error) {
@@ -339,11 +314,131 @@ export default function Invoices() {
   const partialInvoices = invoices.filter(inv => inv.status === 'partial');
   const totalPartial = partialInvoices.reduce((sum, inv) => sum + Number(inv.total_amount || inv.amount || 0), 0);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Invoices</h1>
+              </div>
+            </div>
+          </header>
+          <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+            {/* Stats skeleton */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-6">
+              {[1, 2, 3, 4].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 px-4 py-3">
+                    <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-4 w-4 bg-muted/50 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent className="px-4">
+                    <div className="h-8 w-32 bg-muted/60 rounded animate-pulse mb-2" />
+                    <div className="h-3 w-20 bg-muted/40 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            {/* Table skeleton */}
+            <Card className="shadow-elegant">
+              <CardContent className="p-4">
+                <div className="space-y-4">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="flex items-center gap-4 p-3 rounded-lg border">
+                      <div className="h-5 w-20 bg-muted/50 rounded animate-pulse" />
+                      <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" />
+                      <div className="h-5 w-24 bg-muted/50 rounded animate-pulse" />
+                      <div className="h-5 w-20 bg-muted/40 rounded animate-pulse" />
+                      <div className="h-6 w-16 bg-muted/30 rounded-full animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
       </div>
+    </SidebarProvider>
+  );
+
+  const { hasActiveSubscription, loading: limitsLoading } = useSubscriptionLimits();
+
+  if (loading || limitsLoading) {
+    return <LoadingSkeleton />;
+  }
+
+  // Restrict access for free plan users
+  if (!hasActiveSubscription) {
+    return (
+      <SidebarProvider>
+        <div className="flex w-full min-h-screen">
+          <AppSidebar />
+          <div className="flex-1 bg-background dark:bg-background">
+            <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+              <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Invoices</h1>
+                    <p className="text-xs sm:text-sm text-muted-foreground truncate">Manage your invoices and payments</p>
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            <main className="px-4 sm:px-6 lg:px-8 py-12 flex items-center justify-center min-h-[60vh]">
+              <Card className="w-full max-w-md shadow-elegant text-center">
+                <CardHeader>
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Lock className="w-8 h-8 text-primary" />
+                  </div>
+                  <CardTitle className="text-2xl">Upgrade to Premium</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-muted-foreground">
+                    Invoicing and financial management features are available for Premium users. Upgrade your subscription to unlock:
+                  </p>
+                  <ul className="text-left space-y-2 text-sm text-muted-foreground bg-muted/30 p-4 rounded-lg">
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Create and manage professional invoices
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Track project payments and advances
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Export invoices as PDF
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Detailed financial analytics
+                    </li>
+                  </ul>
+                  <Button
+                    className="w-full mt-4"
+                    onClick={() => navigate('/subscription-management')}
+                  >
+                    Upgrade Subscription
+                  </Button>
+                </CardContent>
+              </Card>
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
     );
   }
 
@@ -351,7 +446,7 @@ export default function Invoices() {
     <SidebarProvider>
       <div className="flex w-full min-h-screen">
         <AppSidebar />
-        <div className="flex-1 bg-background dark:bg-background">
+        <div className="flex-1 bg-background dark:bg-background overflow-hidden">
           <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
             <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
               <SidebarTrigger />
@@ -367,7 +462,7 @@ export default function Invoices() {
             </div>
           </header>
 
-          <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+          <main className="px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 overflow-y-auto overflow-x-hidden">
             {/* Filters */}
             <Card className="mb-4 sm:mb-6 lg:mb-8 shadow-elegant">
               <CardContent className="pt-4 sm:pt-6 px-4 sm:px-6">
@@ -478,9 +573,9 @@ export default function Invoices() {
                 </Button>
               </CardHeader>
               {showProjectsOverview && (
-                <CardContent className="px-4 sm:px-6">
-                  {/* Projects Table */}
-                  <div className="border rounded-lg overflow-hidden">
+                <CardContent className="px-3 sm:px-6">
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block border rounded-lg overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/50">
@@ -495,12 +590,10 @@ export default function Invoices() {
                         {(() => {
                           // Filter the invoice items based on selected filters
                           const filteredItems = invoiceItems.filter(item => {
-                            // Filter by client - check both project's client_id and invoice's client_id
                             if (selectedPerson !== "all") {
                               const projectClientId = item.client_id;
                               if (projectClientId !== selectedPerson) return false;
                             }
-                            // Filter by month
                             if (selectedMonth && selectedMonth !== "all") {
                               if (item.invoice_month !== selectedMonth) return false;
                             }
@@ -519,7 +612,6 @@ export default function Invoices() {
                             );
                           }
 
-                          // Get client name helper
                           const getClientName = (clientId: string) => {
                             const client = clients.find(c => c.id === clientId);
                             return client?.full_name || 'Unknown';
@@ -547,6 +639,57 @@ export default function Invoices() {
                         })()}
                       </TableBody>
                     </Table>
+                  </div>
+
+                  {/* Mobile Card View */}
+                  <div className="block md:hidden space-y-3">
+                    {(() => {
+                      const filteredItems = invoiceItems.filter(item => {
+                        if (selectedPerson !== "all") {
+                          if (item.client_id !== selectedPerson) return false;
+                        }
+                        if (selectedMonth && selectedMonth !== "all") {
+                          if (item.invoice_month !== selectedMonth) return false;
+                        }
+                        return true;
+                      });
+
+                      if (filteredItems.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg">
+                            {invoiceItems.length === 0
+                              ? "No projects linked to invoices yet"
+                              : "No projects match the selected filters"}
+                          </div>
+                        );
+                      }
+
+                      const getClientName = (clientId: string) => {
+                        const client = clients.find(c => c.id === clientId);
+                        return client?.full_name || 'Unknown';
+                      };
+
+                      return filteredItems.slice(0, 20).map((item, index) => (
+                        <div key={item.id || index} className="border rounded-lg p-3 bg-card hover:bg-muted/30">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{item.name}</p>
+                              <p className="text-xs text-muted-foreground">{getClientName(item.client_id)}</p>
+                            </div>
+                            <Badge className={`text-xs ml-2 flex-shrink-0 ${item.invoice_status === "paid" ? "bg-success/10 text-success" :
+                              item.invoice_status === "in_progress" ? "bg-primary/10 text-primary" :
+                                "bg-warning/10 text-warning"
+                              }`}>
+                              {(item.invoice_status || 'PENDING').replace("_", " ").toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">{item.invoice_month || 'N/A'}</span>
+                            <span className="font-bold text-primary">₹{Number(item.fee || 0).toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </CardContent>
               )}
@@ -683,7 +826,7 @@ export default function Invoices() {
                 </div>
 
                 {/* Mobile Card View */}
-                <div className="block md:hidden space-y-4">
+                <div className="block md:hidden space-y-3 p-3">
                   {(() => {
                     // Get the correct list of invoices to display
                     const displayInvoices = (selectedPerson !== "all" || (selectedMonth && selectedMonth !== "all"))
@@ -809,6 +952,8 @@ export default function Invoices() {
           setCreateDialogOpen(false);
           loadData();
         }}
+        userCategory={userCategory}
+        isAgency={isAgency}
       />
 
       <InvoiceDetailsDialog

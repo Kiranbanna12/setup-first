@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   subscription_start_date TIMESTAMPTZ,
   password_hash TEXT,
   two_factor_enabled BOOLEAN DEFAULT FALSE,
+  subscription_shown BOOLEAN DEFAULT FALSE,
   general_settings JSONB DEFAULT '{"email_notifications": true, "push_notifications": true, "sound_enabled": true}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()

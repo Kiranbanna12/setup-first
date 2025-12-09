@@ -107,37 +107,40 @@ export function NotificationPreferences() {
   const categories = [...new Set(NOTIFICATION_EVENTS.map(e => e.category))];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-4">
       {categories.map((category) => (
-        <Card key={category} className="shadow-elegant">
-          <CardHeader>
-            <CardTitle>{category}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {NOTIFICATION_EVENTS.filter(e => e.category === category).map((event) => (
-              <div key={event.key}>
-                <div className="font-medium mb-2">{event.label}</div>
-                <div className="flex items-center gap-6 ml-4">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={preferences?.in_app_notifications?.[event.key] !== false}
-                      onCheckedChange={(checked) => updatePreference(event.key, 'in_app', checked)}
-                    />
-                    <Label>In-App</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={preferences?.email_notifications?.[event.key] !== false}
-                      onCheckedChange={(checked) => updatePreference(event.key, 'email', checked)}
-                    />
-                    <Label>Email</Label>
+        <div key={category} className="space-y-2 sm:space-y-3">
+          <h4 className="text-xs sm:text-sm font-semibold text-primary">{category}</h4>
+          <div className="space-y-2 sm:space-y-3 pl-1 sm:pl-2">
+            {NOTIFICATION_EVENTS.filter(e => e.category === category).map((event, idx, arr) => (
+              <div key={event.key} className={idx !== arr.length - 1 ? "pb-2 sm:pb-3 border-b border-border/50" : ""}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                  <span className="text-xs sm:text-sm font-medium text-foreground">{event.label}</span>
+                  <div className="flex items-center gap-4 sm:gap-6">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <Switch
+                        id={`${event.key}-inapp`}
+                        checked={preferences?.in_app_notifications?.[event.key] !== false}
+                        onCheckedChange={(checked) => updatePreference(event.key, 'in_app', checked)}
+                        className="scale-90 sm:scale-100"
+                      />
+                      <Label htmlFor={`${event.key}-inapp`} className="text-[10px] sm:text-xs text-muted-foreground cursor-pointer">In-App</Label>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <Switch
+                        id={`${event.key}-email`}
+                        checked={preferences?.email_notifications?.[event.key] !== false}
+                        onCheckedChange={(checked) => updatePreference(event.key, 'email', checked)}
+                        className="scale-90 sm:scale-100"
+                      />
+                      <Label htmlFor={`${event.key}-email`} className="text-[10px] sm:text-xs text-muted-foreground cursor-pointer">Email</Label>
+                    </div>
                   </div>
                 </div>
-                <Separator className="mt-4" />
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ))}
     </div>
   );

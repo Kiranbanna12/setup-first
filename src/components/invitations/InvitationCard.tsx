@@ -38,8 +38,8 @@ export function InvitationCard({ invitation, onStatusChange }: InvitationCardPro
       // @ts-ignore
       const { error } = await (supabase as any)
         .from("invitations")
-        .update({ 
-          status: 'accepted', 
+        .update({
+          status: 'accepted',
           invitee_id: user.id,
           responded_at: new Date().toISOString()
         })
@@ -78,8 +78,8 @@ export function InvitationCard({ invitation, onStatusChange }: InvitationCardPro
       // @ts-ignore
       const { error } = await (supabase as any)
         .from("invitations")
-        .update({ 
-          status: 'rejected', 
+        .update({
+          status: 'rejected',
           invitee_id: user.id,
           responded_at: new Date().toISOString()
         })
@@ -117,36 +117,36 @@ export function InvitationCard({ invitation, onStatusChange }: InvitationCardPro
   };
 
   return (
-    <Card className="border-primary/30 bg-primary/5">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
+    <Card className="border-primary/30 bg-primary/5 shadow-sm">
+      <CardContent className="p-3 sm:p-4">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+          <div className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0">
             {invitation.inviter_avatar ? (
               <img
                 src={invitation.inviter_avatar}
                 alt={invitation.inviter_name || "User"}
-                className="w-10 h-10 rounded-full object-cover border-2 border-primary"
+                className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover border-2 border-primary flex-shrink-0"
               />
             ) : (
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                <UserPlus className="w-5 h-5 text-primary" />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
               </div>
             )}
-            <div>
-              <p className="font-medium">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-sm sm:text-base truncate">
                 {invitation.inviter_name || invitation.inviter_email || "Someone"} invited you
               </p>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant="secondary" className="text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1">
+                <Badge variant="secondary" className="text-[10px] sm:text-xs">
                   as {invitation.invitation_type === 'editor' ? 'Editor' : 'Client'}
                 </Badge>
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                <span className="text-[10px] sm:text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                   {formatDate(invitation.created_at)}
                 </span>
               </div>
               {invitation.message && (
-                <p className="text-sm text-muted-foreground mt-2 italic">
+                <p className="text-xs sm:text-sm text-muted-foreground mt-2 italic line-clamp-2">
                   "{invitation.message}"
                 </p>
               )}
@@ -154,35 +154,35 @@ export function InvitationCard({ invitation, onStatusChange }: InvitationCardPro
           </div>
 
           {invitation.status === 'pending' && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 w-full sm:w-auto flex-shrink-0">
               <Button
                 size="sm"
                 variant="outline"
-                className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                className="flex-1 sm:flex-none border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground text-xs sm:text-sm h-8 sm:h-9"
                 onClick={handleReject}
                 disabled={loading}
               >
-                <X className="w-4 h-4 mr-1" />
+                <X className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
                 Decline
               </Button>
               <Button
                 size="sm"
-                className="bg-success hover:bg-success/90 text-success-foreground"
+                className="flex-1 sm:flex-none bg-success hover:bg-success/90 text-success-foreground text-xs sm:text-sm h-8 sm:h-9"
                 onClick={handleAccept}
                 disabled={loading}
               >
-                <Check className="w-4 h-4 mr-1" />
+                <Check className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
                 Accept
               </Button>
             </div>
           )}
 
           {invitation.status === 'accepted' && (
-            <Badge className="bg-success text-success-foreground">Accepted</Badge>
+            <Badge className="bg-success text-success-foreground text-xs">Accepted</Badge>
           )}
 
           {invitation.status === 'rejected' && (
-            <Badge variant="destructive">Declined</Badge>
+            <Badge variant="destructive" className="text-xs">Declined</Badge>
           )}
         </div>
       </CardContent>

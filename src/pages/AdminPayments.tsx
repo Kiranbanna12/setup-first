@@ -115,9 +115,9 @@ export default function AdminPayments() {
       .filter(p => p.status === 'pending')
       .reduce((sum, p) => sum + Number(p.amount), 0);
 
-    const overdueCount = payments.filter(p => 
-      p.status === 'pending' && 
-      p.due_date && 
+    const overdueCount = payments.filter(p =>
+      p.status === 'pending' &&
+      p.due_date &&
       new Date(p.due_date) < new Date()
     ).length;
 
@@ -126,10 +126,10 @@ export default function AdminPayments() {
     const monthlyRevenue = payments
       .filter(p => {
         const paidDate = p.paid_date ? new Date(p.paid_date) : null;
-        return p.status === 'paid' && 
-               paidDate &&
-               paidDate.getMonth() === currentMonth &&
-               paidDate.getFullYear() === currentYear;
+        return p.status === 'paid' &&
+          paidDate &&
+          paidDate.getMonth() === currentMonth &&
+          paidDate.getFullYear() === currentYear;
       })
       .reduce((sum, p) => sum + Number(p.amount), 0);
 
@@ -169,9 +169,40 @@ export default function AdminPayments() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="Payment & Financial Management" description="Monitor transactions and revenue">
+        <div className="max-w-7xl space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="shadow-elegant">
+                <CardHeader className="pb-2">
+                  <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-20 bg-muted/50 rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card className="shadow-elegant">
+            <CardContent className="pt-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[1, 2].map((i) => (
+                  <div key={i} className="h-10 bg-muted/40 rounded animate-pulse" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-elegant">
+            <CardContent className="p-0">
+              <div className="space-y-2 p-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-12 w-full bg-muted/30 rounded animate-pulse" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AdminLayout>
     );
   }
 
@@ -289,13 +320,13 @@ export default function AdminPayments() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {payment.due_date 
+                      {payment.due_date
                         ? format(new Date(payment.due_date), 'MMM dd, yyyy')
                         : "N/A"
                       }
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {payment.paid_date 
+                      {payment.paid_date
                         ? format(new Date(payment.paid_date), 'MMM dd, yyyy')
                         : "-"
                       }

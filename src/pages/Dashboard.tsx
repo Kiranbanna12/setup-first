@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Video, Users, DollarSign, FileText, BarChart3, LogOut, Settings, MessageSquare, Database } from "lucide-react";
+import { Video, Users, DollarSign, FileText, BarChart3, LogOut, Settings, MessageSquare, Database, CheckCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Chart as ChartJS, ArcElement, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
@@ -43,30 +43,20 @@ const Dashboard = () => {
         return;
       }
 
-      // Load profile directly from Supabase
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
+      const userId = session.user.id;
 
-      if (profileData) {
-        setProfile(profileData as Profile);
+      // Run all queries in parallel for faster loading
+      const [profileResult, projectsResult, paymentsResult] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userId).single(),
+        supabase.from('projects').select('*').eq('created_by', userId),
+        supabase.from('payments').select('*').eq('user_id', userId)
+      ]);
+
+      if (profileResult.data) {
+        setProfile(profileResult.data as Profile);
       }
-
-      // Load projects directly from Supabase
-      const { data: projectsData } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('created_by', session.user.id);
-      setProjects(projectsData || []);
-
-      // Load payments directly from Supabase
-      const { data: paymentsData } = await supabase
-        .from('payments')
-        .select('*')
-        .eq('user_id', session.user.id);
-      setPayments(paymentsData || []);
+      setProjects(projectsResult.data || []);
+      setPayments(paymentsResult.data || []);
 
     } catch (error: any) {
       console.error('🔧 Dashboard: Error loading dashboard data:', error);
@@ -199,12 +189,68 @@ const Dashboard = () => {
     ? Math.round((completedProjects.length / projects.length) * 100)
     : 0;
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <Video className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Xrozen Workflow</h1>
+                  <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </header>
+          <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+            <div className="mb-4 sm:mb-6 lg:mb-8">
+              <div className="h-7 w-48 bg-muted/50 rounded animate-pulse mb-2" />
+              <div className="h-4 w-64 bg-muted/50 rounded animate-pulse" />
+            </div>
+            {/* Skeleton stats grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-4 sm:mb-6 lg:mb-8">
+              {[1, 2, 3, 4].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2 px-4 py-3 sm:px-6 sm:py-4">
+                    <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-4 w-4 bg-muted/50 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent className="px-4 sm:px-6">
+                    <div className="h-8 w-16 bg-muted/50 rounded animate-pulse mb-2" />
+                    <div className="h-3 w-32 bg-muted/50 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            {/* Skeleton charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
+              {[1, 2].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+                    <div className="h-5 w-40 bg-muted/50 rounded animate-pulse mb-1" />
+                    <div className="h-3 w-32 bg-muted/50 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent className="px-4 sm:px-6">
+                    <div className="h-[250px] sm:h-[300px] bg-muted/30 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -217,8 +263,9 @@ const Dashboard = () => {
             <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
               <SidebarTrigger />
               <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
-                  <Video className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                {/* Current Selection Placeholder */}
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-success/10 flex items-center justify-center flex-shrink-0">
+                  <CheckCheck className="w-4 h-4 sm:w-5 sm:h-5 text-success" />
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Xrozen Workflow</h1>

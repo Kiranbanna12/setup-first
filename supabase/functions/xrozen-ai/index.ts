@@ -15,6 +15,17 @@ function formatTimestamp(seconds: number | null | undefined): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+// Helper function to format dates in readable format
+function formatDate(dateString: string | null | undefined): string {
+  if (!dateString) return 'Not set';
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return 'Not set';
+  }
+}
+
 interface FunctionArgs {
   name?: string;
   description?: string;
@@ -88,7 +99,7 @@ serve(async (req) => {
       });
     }
 
-    const { message, conversationId, messages } = body;
+    const { message, conversationId, messages, appUrl } = body;
 
     if (!message) {
       return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -232,6 +243,13 @@ CAPABILITIES:
 5. View all video versions for projects (read)
 6. Get preview links for specific versions
 7. View editor/client worksheets data
+
+CRITICAL FORMATTING RULES:
+- NEVER show IDs to users - they are internal only
+- When tool results contain markdown links like [Name](url), PRESERVE THEM EXACTLY in your response
+- Do not reformat or rewrite markdown links
+- Keep responses clean and user-friendly
+- For lists, just show the clickable name and relevant info (status, deadline) - no IDs
 
 When user asks for a link:
 - For version preview: provide the preview_url from video_versions
@@ -433,7 +451,12 @@ Always be helpful, concise, and professional in Hindi or English based on user's
 
     const result = await chat.sendMessage(message);
     const response = await result.response;
-    let assistantMessage = response.text();
+
+    // Only call text() if there are no function calls - otherwise it throws an error
+    let assistantMessage = '';
+    if (!response.functionCalls() || response.functionCalls()!.length === 0) {
+      assistantMessage = response.text();
+    }
 
     // Handle function calls - loop to handle multiple sequential calls
     let currentResponse = response;
@@ -588,8 +611,9 @@ Always be helpful, concise, and professional in Hindi or English based on user's
               .order('created_at', { ascending: false });
 
             if (listError) throw listError;
+            const baseUrl = appUrl || 'http://localhost:5173';
             toolResult = projects && projects.length > 0
-              ? `Your projects:\n${projects.map((p: any) => `- ${p.name} (ID: ${p.id}, Status: ${p.status}, Deadline: ${p.deadline || 'Not set'})`).join('\n')}`
+              ? `Your projects:\n${projects.map((p: any) => `- [${p.name}](${baseUrl}/projects/${p.id}) - ${p.status}${p.deadline ? `, Due: ${formatDate(p.deadline)}` : ''}`).join('\n')}`
               : 'You have no projects currently.';
             break;
           }
@@ -602,8 +626,9 @@ Always be helpful, concise, and professional in Hindi or English based on user's
               .order('created_at', { ascending: false });
 
             if (listError) throw listError;
+            const baseUrl = appUrl || 'http://localhost:5173';
             toolResult = clients && clients.length > 0
-              ? `Your clients:\n${clients.map((c: any) => `- ${c.full_name} (ID: ${c.id}, Email: ${c.email}, Company: ${c.company || 'N/A'})`).join('\n')}`
+              ? `Your clients:\n${clients.map((c: any) => `- [${c.full_name}](${baseUrl}/clients/${c.id}/worksheet) - ${c.company || 'No company'}, ${c.email}`).join('\n')}`
               : 'You have no clients currently.';
             break;
           }
@@ -616,8 +641,9 @@ Always be helpful, concise, and professional in Hindi or English based on user's
               .order('created_at', { ascending: false });
 
             if (listError) throw listError;
+            const baseUrl = appUrl || 'http://localhost:5173';
             toolResult = editors && editors.length > 0
-              ? `Your editors:\n${editors.map((e: any) => `- ${e.full_name} (ID: ${e.id}, Email: ${e.email}, Specialty: ${e.specialty || 'General'})`).join('\n')}`
+              ? `Your editors:\n${editors.map((e: any) => `- [${e.full_name}](${baseUrl}/editors/${e.id}/worksheet) - ${e.specialty || 'General'}, ${e.email}`).join('\n')}`
               : 'You have no editors currently.';
             break;
           }
@@ -662,15 +688,15 @@ Always be helpful, concise, and professional in Hindi or English based on user's
               return { ...f, userName: profile?.full_name || 'Unknown' };
             }));
 
+            const baseUrl = appUrl || 'http://localhost:5173';
             toolResult = `
-Project: ${project.name}
-ID: ${project.id}
+Project: [${project.name}](${baseUrl}/projects/${project.id})
 Status: ${project.status}
 Description: ${project.description || 'N/A'}
 Deadline: ${project.deadline || 'Not set'}
 
 Versions (${versions?.length || 0}):
-${versions?.map((v: any) => `- v${v.version_number}: ${v.preview_url} (ID: ${v.id})`).join('\n') || 'No versions'}
+${versions?.map((v: any) => `- [v${v.version_number}](${baseUrl}/projects/${project.id}?version=${v.id}): [Preview](${v.preview_url})`).join('\n') || 'No versions'}
 
 Feedback (${feedbackWithNames?.length || 0}):
 ${feedbackWithNames?.map((f: any) => `- [${formatTimestamp(f.timestamp_seconds)}] "${f.comment_text}" by ${f.userName}`).join('\n') || 'No feedback'}
@@ -741,8 +767,9 @@ ${feedbackWithNames?.map((f: any) => `- [${formatTimestamp(f.timestamp_seconds)}
               .order('version_number', { ascending: false });
 
             if (versionsError) throw versionsError;
+            const baseUrl = appUrl || 'http://localhost:5173';
             toolResult = versions && versions.length > 0
-              ? `Versions for "${project.name}":\n${versions.map((v: any) => `- v${v.version_number}: ${v.preview_url} (ID: ${v.id}, Notes: ${v.notes || 'None'})`).join('\n')}`
+              ? `Versions for "[${project.name}](${baseUrl}/projects/${project.id})":\n${versions.map((v: any) => `- [v${v.version_number}](${baseUrl}/projects/${project.id}?version=${v.id}): [Preview Link](${v.preview_url}) - ${v.notes || 'No notes'}`).join('\n')}`
               : 'No versions found for this project.';
             break;
           }

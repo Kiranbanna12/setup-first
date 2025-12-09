@@ -32,7 +32,7 @@ const Notifications = () => {
     refresh,
   } = useNotifications();
 
-  const [filterPriority, setFilterPriority] = useState<string[]>(['info', 'important', 'critical']);
+  const [filterPriority, setFilterPriority] = useState<string[]>(['info', 'important', 'critical', 'high', 'normal']);
   const [filterType, setFilterType] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -92,12 +92,58 @@ const Notifications = () => {
   // Get unique types for filter
   const uniqueTypes = Array.from(new Set(notifications.map(n => n.type))).filter(Boolean);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen overflow-hidden">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background overflow-x-hidden overflow-y-auto">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4 w-full max-w-full">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Notifications</h1>
+              </div>
+            </div>
+          </header>
+          <main className="px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8 w-full max-w-full">
+            <div className="mb-4 sm:mb-6 lg:mb-8">
+              <div className="h-7 w-48 bg-muted/50 rounded animate-pulse mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded animate-pulse" />
+            </div>
+            <Card className="shadow-elegant">
+              <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+                <div className="flex items-center gap-2">
+                  <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                </div>
+              </CardHeader>
+              <CardContent className="px-4 sm:px-6 pb-4 sm:pb-6">
+                <div className="space-y-3">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border">
+                      <div className="w-10 h-10 rounded-full bg-muted/50 animate-pulse flex-shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 w-3/4 bg-muted/50 rounded animate-pulse" />
+                        <div className="h-3 w-1/2 bg-muted/40 rounded animate-pulse" />
+                        <div className="h-3 w-1/4 bg-muted/30 rounded animate-pulse" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   return (

@@ -427,7 +427,7 @@ export const ChatMembers = ({ projectId, currentUserId, projectCreatorId, onMemb
                                                     </Button>
                                                     <Button
                                                         size="sm"
-                                                        className="h-8 w-8 p-0 bg-green-500 hover:bg-green-600"
+                                                        className="h-8 w-8 p-0 bg-success hover:bg-success/80"
                                                         onClick={async () => {
                                                             const { error } = await supabase
                                                                 .from('project_chat_members' as any)
@@ -467,8 +467,8 @@ export const ChatMembers = ({ projectId, currentUserId, projectCreatorId, onMemb
                                             >
                                                 <Avatar className="h-10 w-10">
                                                     <AvatarFallback className={`font-medium ${member.role === 'owner' ? 'bg-yellow-500/20 text-yellow-600' :
-                                                        member.role === 'editor' ? 'bg-blue-500/20 text-blue-600' :
-                                                            member.role === 'client' ? 'bg-green-500/20 text-green-600' :
+                                                        member.role === 'editor' ? 'bg-primary/20 text-primary' :
+                                                            member.role === 'client' ? 'bg-success/20 text-success' :
                                                                 'bg-primary/10 text-primary'
                                                         }`}>
                                                         {getMemberInitials(member)}
@@ -488,12 +488,12 @@ export const ChatMembers = ({ projectId, currentUserId, projectCreatorId, onMemb
                                                             </Badge>
                                                         )}
                                                         {member.role === 'editor' && (
-                                                            <Badge variant="default" className="gap-1 bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                                            <Badge variant="default" className="gap-1 bg-primary/10 text-primary border-primary/20">
                                                                 Editor
                                                             </Badge>
                                                         )}
                                                         {member.role === 'client' && (
-                                                            <Badge variant="default" className="gap-1 bg-green-500/10 text-green-600 border-green-500/20">
+                                                            <Badge variant="default" className="gap-1 bg-success/10 text-success border-success/20">
                                                                 Client
                                                             </Badge>
                                                         )}

@@ -1,14 +1,9 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
+# Only allow homepage to be indexed
+# All other pages are blocked from search engines
 
 User-agent: *
-Allow: /
+Allow: /$
+Disallow: /
+
+# Sitemap for homepage only
+Sitemap: https://workflow.xrozen.com/sitemap.xml

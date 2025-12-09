@@ -7,6 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { toast } from "sonner";
 import {
   Sheet,
   SheetContent,
@@ -234,7 +235,7 @@ export const MessageInput = ({
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="flex-1 flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm min-w-0">
               {attachment.type.startsWith('image/') ? (
-                <ImageIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-500 flex-shrink-0" />
+                <ImageIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success flex-shrink-0" />
               ) : attachment.type.startsWith('video/') ? (
                 <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-500 flex-shrink-0" />
               ) : (
@@ -297,16 +298,22 @@ export const MessageInput = ({
                     type="button"
                     variant="ghost"
                     className="justify-start gap-2 sm:gap-3 h-8 sm:h-10 text-xs sm:text-sm"
-                    onClick={() => imageInputRef.current?.click()}
+                    onClick={() => {
+                      toast.info("Photo upload - Coming soon");
+                      if (isMobile) setShowEmojiPicker(false); // Close menu if on mobile
+                    }}
                   >
-                    <ImageIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-500 flex-shrink-0" />
+                    <ImageIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success flex-shrink-0" />
                     <span>Photos</span>
                   </Button>
                   <Button
                     type="button"
                     variant="ghost"
                     className="justify-start gap-2 sm:gap-3 h-8 sm:h-10 text-xs sm:text-sm"
-                    onClick={() => videoInputRef.current?.click()}
+                    onClick={() => {
+                      toast.info("Video upload - Coming soon");
+                      if (isMobile) setShowEmojiPicker(false);
+                    }}
                   >
                     <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-500 flex-shrink-0" />
                     <span>Videos</span>
@@ -315,7 +322,10 @@ export const MessageInput = ({
                     type="button"
                     variant="ghost"
                     className="justify-start gap-2 sm:gap-3 h-8 sm:h-10 text-xs sm:text-sm"
-                    onClick={() => documentInputRef.current?.click()}
+                    onClick={() => {
+                      toast.info("Document upload - Coming soon");
+                      if (isMobile) setShowEmojiPicker(false);
+                    }}
                   >
                     <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-orange-500 flex-shrink-0" />
                     <span>Documents</span>

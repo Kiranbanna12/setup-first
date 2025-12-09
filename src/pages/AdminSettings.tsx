@@ -85,9 +85,25 @@ export default function AdminSettings() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="Admin Settings" description="Configure app-wide settings">
+        <div className="max-w-4xl space-y-6">
+          <Card className="shadow-elegant">
+            <CardHeader>
+              <div className="h-6 w-48 bg-muted/50 rounded animate-pulse" />
+              <div className="h-4 w-64 bg-muted/40 rounded animate-pulse mt-2" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {[1, 2].map((i) => (
+                <div key={i} className="space-y-2">
+                  <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-10 w-full bg-muted/40 rounded animate-pulse" />
+                </div>
+              ))}
+              <div className="h-10 w-full bg-muted/50 rounded animate-pulse mt-4" />
+            </CardContent>
+          </Card>
+        </div>
+      </AdminLayout>
     );
   }
 

@@ -188,8 +188,33 @@ export default function SubscriptionSelect() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-primary/5 to-success/5">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-success/5 py-12 px-4">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="h-10 w-64 bg-muted/50 rounded animate-pulse mx-auto mb-4" />
+            <div className="h-5 w-48 bg-muted/40 rounded animate-pulse mx-auto" />
+          </div>
+          <div className="grid md:grid-cols-3 gap-8">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="shadow-elegant">
+                <CardHeader>
+                  <div className="h-8 w-8 bg-muted/50 rounded animate-pulse mb-4" />
+                  <div className="h-7 w-32 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-4 w-24 bg-muted/40 rounded animate-pulse mt-2" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-10 w-28 bg-muted/50 rounded animate-pulse mb-6" />
+                  <div className="space-y-3 mb-6">
+                    {[1, 2, 3, 4].map((j) => (
+                      <div key={j} className="h-4 w-full bg-muted/30 rounded animate-pulse" />
+                    ))}
+                  </div>
+                  <div className="h-10 w-full bg-muted/40 rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

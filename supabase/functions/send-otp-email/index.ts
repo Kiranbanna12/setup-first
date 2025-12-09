@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -9,6 +10,49 @@ const corsHeaders = {
 interface OTPRequest {
     email?: string;
     userId: string;
+}
+
+// Helper function to send email via SMTP
+async function sendEmailViaSMTP(to: string, subject: string, htmlBody: string): Promise<boolean> {
+    const SMTP_HOST = Deno.env.get('SMTP_HOST');
+    const SMTP_PORT = parseInt(Deno.env.get('SMTP_PORT') || '465');
+    const SMTP_USER = Deno.env.get('SMTP_USER');
+    const SMTP_PASS = Deno.env.get('SMTP_PASS');
+    const SMTP_FROM_NOREPLY = Deno.env.get('SMTP_FROM_NOREPLY') || 'noreply@xrozen.com';
+
+    if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+        console.error('SMTP not configured. Required: SMTP_HOST, SMTP_USER, SMTP_PASS');
+        return false;
+    }
+
+    try {
+        const client = new SMTPClient({
+            connection: {
+                hostname: SMTP_HOST,
+                port: SMTP_PORT,
+                tls: true,
+                auth: {
+                    username: SMTP_USER,
+                    password: SMTP_PASS,
+                },
+            },
+        });
+
+        await client.send({
+            from: SMTP_FROM_NOREPLY,
+            to: to,
+            subject: subject,
+            content: "auto",
+            html: htmlBody,
+        });
+
+        await client.close();
+        console.log(`OTP email sent successfully via SMTP to ${to}`);
+        return true;
+    } catch (error: any) {
+        console.error('SMTP email error:', error.message || error);
+        return false;
+    }
 }
 
 serve(async (req) => {
@@ -59,51 +103,36 @@ serve(async (req) => {
             throw new Error('OTP code generation returned null');
         }
 
-        step = 'prepare_email';
-        let resendApiKey = Deno.env.get('RESEND_API_KEY');
-
-        if (resendApiKey) {
-            resendApiKey = resendApiKey.replace(/^["']|["']$/g, '').trim();
-        }
-
-        if (!resendApiKey) {
-            throw new Error('RESEND_API_KEY not configured');
-        }
-
         step = 'send_email';
-        console.log(`Sending email to ${email}`);
+        console.log(`Sending OTP email to ${email}`);
 
-        const emailResponse = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${resendApiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                from: 'Xrozen Flow <onboarding@resend.dev>',
-                to: [email],
-                subject: 'Your Login Verification Code',
-                html: `
-          <!DOCTYPE html>
-          <html>
-          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
-            <div style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h1 style="color: #3b82f6; margin-bottom: 20px; font-size: 24px;">Verification Code</h1>
-                <p style="color: #666; margin-bottom: 30px;">Enter the following code to complete your login:</p>
-                <div style="background-color: #eff6ff; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px dashed #3b82f6;">
-                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #1d4ed8;">${otpCode}</span>
-                </div>
-                <p style="color: #888; font-size: 14px;">This code expires in 10 minutes.</p>
-            </div>
-          </body>
-          </html>
-        `,
-            }),
-        });
+        const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f5; padding: 20px; margin: 0;">
+        <div style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="margin-bottom: 25px;">
+            <img src="https://workflow.xrozen.com/logo.png" alt="Xrozen Workflow" style="width: 60px; height: 60px; border-radius: 50%;" />
+            <h2 style="color: #16a34a; margin: 10px 0 0 0; font-size: 20px; font-weight: 700;">Xrozen Workflow</h2>
+          </div>
+          <h1 style="color: #1f2937; margin-bottom: 15px; font-size: 22px;">Verification Code</h1>
+          <p style="color: #6b7280; margin-bottom: 25px;">Enter the following code to complete your login:</p>
+          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 25px; border-radius: 12px; margin-bottom: 25px;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #ffffff;">${otpCode}</span>
+          </div>
+          <p style="color: #9ca3af; font-size: 14px; margin-bottom: 8px;">This code expires in 10 minutes.</p>
+          <p style="color: #d1d5db; font-size: 12px;">If you didn't request this code, please ignore this email.</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 25px 0;"/>
+          <p style="color: #9ca3af; font-size: 11px;">© ${new Date().getFullYear()} Xrozen Workflow. All rights reserved.</p>
+        </div>
+      </body>
+      </html>
+    `;
 
-        if (!emailResponse.ok) {
-            const errorText = await emailResponse.text();
-            throw new Error(`Resend API error (${emailResponse.status}): ${errorText}`);
+        const emailSent = await sendEmailViaSMTP(email, 'Your Xrozen Login Verification Code', htmlBody);
+
+        if (!emailSent) {
+            throw new Error('Failed to send OTP email via SMTP');
         }
 
         step = 'success';
@@ -120,12 +149,12 @@ serve(async (req) => {
         );
 
     } catch (error: any) {
+        console.error(`Error at step ${step}:`, error.message);
         return new Response(
             JSON.stringify({
                 success: false,
                 error: error.message,
                 failed_at_step: step,
-                details: error.stack
             }),
             {
                 status: 200, // Return 200 to allow client error parsing

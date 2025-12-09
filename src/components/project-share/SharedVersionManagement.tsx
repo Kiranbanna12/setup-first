@@ -251,7 +251,7 @@ export const SharedVersionManagement = ({
                                                             href={version.final_url}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="flex items-center justify-center gap-2 text-xs bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded border border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                                                            className="flex items-center justify-center gap-2 text-xs bg-success/10 dark:bg-success/20 px-3 py-2 rounded border border-success/30 text-success hover:bg-success/20 dark:hover:bg-success/30 transition-colors"
                                                         >
                                                             <LinkIcon className="w-3 h-3" />
                                                             Final Link
@@ -336,7 +336,7 @@ export const SharedVersionManagement = ({
                                                                     href={version.final_url}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
-                                                                    className="text-green-600 hover:text-green-800 font-semibold text-sm bg-green-50 px-2 py-1 rounded border border-green-200 hover:bg-green-100 transition-colors"
+                                                                    className="text-success hover:text-success/80 font-semibold text-sm bg-success/10 px-2 py-1 rounded border border-success/30 hover:bg-success/20 transition-colors"
                                                                 >
                                                                     <LinkIcon className="w-3 h-3 mr-1 inline" />
                                                                     Final Link

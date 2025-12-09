@@ -1,3 +1,4 @@
+// @ts-nocheck - RPC function types not yet generated
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -41,134 +42,107 @@ const ProjectDetails = () => {
       setSubProjects([]);
       setSubProjectVersions({});
 
-      loadProjectDetails();
-      loadUserRole();
-      loadCurrentUser();
+      // Load all data in parallel with a single auth call
+      loadAllData();
     }
   }, [projectId]);
 
-  const loadCurrentUser = async () => {
+  const loadAllData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setCurrentUserId(user.id);
-
-        // Get all editor records associated with this user
-        const { data: editors } = await supabase
-          .from('editors')
-          .select('id')
-          .eq('user_id', user.id);
-
-        if (editors) {
-          setMyEditorIds(editors.map(e => e.id));
-        }
-
-        // Get all client records associated with this user
-        const { data: clients } = await supabase
-          .from('clients')
-          .select('id')
-          .eq('user_id', user.id);
-
-        if (clients) {
-          setMyClientIds(clients.map(c => c.id));
-        }
-      }
-    } catch (error) {
-      console.error("Error loading current user:", error);
-    }
-  };
-
-  const loadUserRole = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (roles) {
-        setUserRole(roles.role);
-      }
-    } catch (error) {
-      console.error("Error loading user role:", error);
-    }
-  };
-
-  const loadProjectDetails = async () => {
-    try {
+      // Single auth call at the start
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         navigate("/auth");
         return;
       }
 
-      // Load project
-      const { data: projectData, error: projectError } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .maybeSingle();
+      const userId = session.user.id;
+      setCurrentUserId(userId);
 
-      if (projectError || !projectData) {
+      // Try RPC first for SINGLE database call (fastest option)
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_project_details_data', {
+        p_project_id: projectId,
+        p_user_id: userId
+      });
+
+      if (!rpcError && rpcData && !rpcData.error) {
+        // RPC succeeded - set all data at once
+        if (rpcData.project) {
+          setProject(rpcData.project);
+          setEditor(rpcData.editor);
+          setClient(rpcData.client);
+          setVersions(rpcData.versions || []);
+          setSubProjects(rpcData.sub_projects || []);
+          setSubProjectVersions(rpcData.sub_project_versions || {});
+          if (rpcData.user_role) setUserRole(rpcData.user_role);
+          setMyEditorIds(rpcData.my_editor_ids || []);
+          setMyClientIds(rpcData.my_client_ids || []);
+          return; // Done!
+        }
+      }
+
+      // Fallback: RPC not available, use parallel queries
+      console.log("RPC not available, using fallback parallel queries");
+
+      // PARALLEL BATCH 1: Load project, user role, my editors/clients
+      const [projectResult, rolesResult, editorsResult, clientsResult] = await Promise.all([
+        supabase.from('projects').select('*').eq('id', projectId as string).maybeSingle(),
+        supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('editors').select('id').eq('user_id', userId),
+        supabase.from('clients').select('id').eq('user_id', userId)
+      ]);
+
+      if (rolesResult.data) setUserRole((rolesResult.data as any).role);
+      if (editorsResult.data) setMyEditorIds((editorsResult.data as any[]).map((e: any) => e.id));
+      if (clientsResult.data) setMyClientIds((clientsResult.data as any[]).map((c: any) => c.id));
+
+      if (projectResult.error || !projectResult.data) {
         toast.error("Project not found");
         navigate("/projects");
         return;
       }
 
+      const projectData = projectResult.data as any;
       setProject(projectData);
 
-      // Load editor info if assigned
+      // PARALLEL BATCH 2: Load versions, sub-projects, editor, client
+      const batch2Promises: Promise<any>[] = [
+        supabase.from('video_versions').select('*').eq('project_id', projectId as string).order('version_number', { ascending: false }),
+        supabase.from('projects').select('*').eq('parent_project_id', projectId as string)
+      ];
+
       if (projectData.editor_id) {
-        const { data: editorData } = await supabase
-          .from('editors')
-          .select('*')
-          .eq('id', projectData.editor_id)
-          .maybeSingle();
-        if (editorData) setEditor(editorData);
+        batch2Promises.push(supabase.from('editors').select('*').eq('id', projectData.editor_id).maybeSingle());
       }
-
-      // Load client info if assigned
       if (projectData.client_id) {
-        const { data: clientData } = await supabase
-          .from('clients')
-          .select('*')
-          .eq('id', projectData.client_id)
-          .maybeSingle();
-        if (clientData) setClient(clientData);
+        batch2Promises.push(supabase.from('clients').select('*').eq('id', projectData.client_id).maybeSingle());
       }
 
-      // Load versions
-      const { data: versionsData } = await supabase
-        .from('video_versions')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('version_number', { ascending: false });
+      const batch2Results = await Promise.all(batch2Promises);
 
-      setVersions(versionsData || []);
+      setVersions((batch2Results[0].data as any[]) || []);
+      const subProjectsData = (batch2Results[1].data as any[]) || [];
+      setSubProjects(subProjectsData);
 
-      // Load sub-projects
-      const { data: subProjectsData } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('parent_project_id', projectId);
+      let idx = 2;
+      if (projectData.editor_id && batch2Results[idx]?.data) {
+        setEditor(batch2Results[idx].data);
+        idx++;
+      }
+      if (projectData.client_id && batch2Results[idx]?.data) {
+        setClient(batch2Results[idx].data);
+      }
 
-      setSubProjects(subProjectsData || []);
-
-      // Load versions for sub-projects
-      if (subProjectsData && subProjectsData.length > 0) {
+      // PARALLEL BATCH 3: All sub-project versions at once
+      if (subProjectsData.length > 0) {
+        const subVersionPromises = subProjectsData.map((sp: any) =>
+          supabase.from('video_versions').select('*').eq('project_id', sp.id).order('version_number', { ascending: false })
+        );
+        const subVersionResults = await Promise.all(subVersionPromises);
         const versionsMap: Record<string, any[]> = {};
-        for (const subProject of subProjectsData) {
-          const { data: subVersions } = await supabase
-            .from('video_versions')
-            .select('*')
-            .eq('project_id', subProject.id)
-            .order('version_number', { ascending: false });
-
-          versionsMap[subProject.id] = subVersions || [];
-        }
+        subProjectsData.forEach((sp: any, i: number) => {
+          versionsMap[sp.id] = (subVersionResults[i].data as any[]) || [];
+        });
         setSubProjectVersions(versionsMap);
       }
 
@@ -178,6 +152,19 @@ const ProjectDetails = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadCurrentUser = async () => {
+    // Kept for compatibility but now handled in loadAllData
+  };
+
+  const loadUserRole = async () => {
+    // Kept for compatibility but now handled in loadAllData
+  };
+
+  const loadProjectDetails = async () => {
+    // Kept for compatibility - calls loadAllData
+    await loadAllData();
   };
 
   const loadSubProjectVersions = async (subProjectId: string) => {
@@ -233,12 +220,69 @@ const ProjectDetails = () => {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <SidebarTrigger />
+                <div className="h-8 w-32 bg-muted/50 rounded animate-pulse" />
+              </div>
+            </div>
+          </header>
+          <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+            <div className="mb-6">
+              <div className="h-8 w-64 bg-muted/50 rounded animate-pulse mb-2" />
+              <div className="h-4 w-96 bg-muted/40 rounded animate-pulse" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mt-6">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="pb-3">
+                    <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            <Card className="shadow-elegant mt-4">
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i}>
+                      <div className="h-3 w-20 bg-muted/40 rounded animate-pulse mb-2" />
+                      <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="shadow-elegant mt-6">
+              <CardHeader>
+                <div className="h-5 w-40 bg-muted/50 rounded animate-pulse" />
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-16 w-full bg-muted/30 rounded animate-pulse" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   if (!project) {

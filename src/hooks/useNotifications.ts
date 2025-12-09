@@ -1,27 +1,64 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Notification, notificationService } from '@/lib/notifications';
 import { useToast } from '@/hooks/use-toast';
 
+// Global cache for notifications to persist across page changes
+let cachedNotifications: Notification[] | null = null;
+let cachedUnreadCount: number | null = null;
+let isSubscribed = false;
+let globalChannel: any = null;
+
 export function useNotifications() {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Initialize with cached values for instant display (no flicker!)
+  const [notifications, setNotifications] = useState<Notification[]>(cachedNotifications || []);
+  const [unreadCount, setUnreadCount] = useState(cachedUnreadCount ?? 0);
+  const [loading, setLoading] = useState(cachedNotifications === null);
   const { toast } = useToast();
+  const isFirstMount = useRef(true);
 
   const loadNotifications = async () => {
     const { data } = await notificationService.getNotifications(50, 0);
-    setNotifications(data as Notification[]);
+    const notifs = data as Notification[];
+    cachedNotifications = notifs; // Update cache
+    setNotifications(notifs);
     setLoading(false);
   };
 
   const updateUnreadCount = async () => {
     const count = await notificationService.getUnreadCount();
+    cachedUnreadCount = count; // Update cache
     setUnreadCount(count);
   };
 
+  // Sync local state back to cache when it changes
   useEffect(() => {
-    loadNotifications();
+    if (!isFirstMount.current) {
+      cachedNotifications = notifications;
+    }
+  }, [notifications]);
+
+  useEffect(() => {
+    if (!isFirstMount.current) {
+      cachedUnreadCount = unreadCount;
+    }
+  }, [unreadCount]);
+
+  useEffect(() => {
+    isFirstMount.current = false;
+
+    // If we have cached data, use it for instant display (no flicker)
+    // But ALWAYS refresh from database to ensure data is current
+    if (cachedNotifications !== null) {
+      setLoading(false);
+      // Refresh in background to get latest data
+      loadNotifications();
+    } else {
+      // No cache, load fresh
+      loadNotifications();
+    }
+
+    // Always refresh unread count
     updateUnreadCount();
 
     // Subscribe to real-time notifications

@@ -41,17 +41,22 @@ import Pricing from "./pages/Pricing";
 import SubscriptionManagement from "./pages/SubscriptionManagement";
 import Notes from "./pages/Notes";
 import NoteDetails from "./pages/NoteDetails";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import Terms from "./pages/Terms";
 
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { CurrencyProvider } from "@/contexts/CurrencyContext";
 
 const queryClient = new QueryClient();
 
+import { GlobalMouseEffect } from "@/components/layout/GlobalMouseEffect";
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <CurrencyProvider>
       <ThemeProvider>
         <TooltipProvider>
+          <GlobalMouseEffect />
           <Toaster />
           <Sonner />
           <BrowserRouter>
@@ -61,6 +66,9 @@ const App = () => (
               <Route path="/about" element={<About />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/pricing" element={<Pricing />} />
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+              <Route path="/terms" element={<Terms />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:projectId" element={<ProjectDetails />} />

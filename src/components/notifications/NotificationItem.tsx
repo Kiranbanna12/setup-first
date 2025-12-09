@@ -31,7 +31,7 @@ export function NotificationItem({ notification }: NotificationItemProps) {
 
   const Icon = getNotificationIcon(notification.type);
   const priorityColor = {
-    info: 'text-blue-500',
+    info: 'text-success',
     important: 'text-orange-500',
     critical: 'text-red-500',
   }[notification.priority];

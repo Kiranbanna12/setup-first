@@ -63,7 +63,7 @@ export function PendingInvitations({ type = 'all', onUpdate }: PendingInvitation
       }
 
       // Filter to only invitations where email matches
-      const myInvitations = (invitationsData || []).filter((inv: any) => 
+      const myInvitations = (invitationsData || []).filter((inv: any) =>
         inv.invitee_email?.toLowerCase().trim() === userEmail ||
         inv.invitee_id === user.id
       );
@@ -113,12 +113,12 @@ export function PendingInvitations({ type = 'all', onUpdate }: PendingInvitation
   }
 
   return (
-    <div className="mb-6 space-y-4">
+    <div className="mb-4 sm:mb-6 space-y-3 sm:space-y-4">
       <div className="flex items-center gap-2 text-primary">
-        <Bell className="w-5 h-5" />
-        <h3 className="font-semibold">Pending Invitations ({invitations.length})</h3>
+        <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
+        <h3 className="font-semibold text-sm sm:text-base">Pending Invitations ({invitations.length})</h3>
       </div>
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         {invitations.map((invitation) => (
           <InvitationCard
             key={invitation.id}

@@ -26,7 +26,7 @@ const Admin = () => {
   const loadAdminData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (!user) {
         navigate("/auth");
         return;
@@ -74,8 +74,30 @@ const Admin = () => {
   if (loading) {
     return (
       <AdminLayout title="Admin Dashboard" description="Manage users, payments, and system settings">
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="shadow-elegant">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                  <div className="h-4 w-4 bg-muted/40 rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-16 bg-muted/50 rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card className="shadow-elegant">
+            <CardHeader>
+              <div className="h-6 w-32 bg-muted/50 rounded animate-pulse" />
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-16 bg-muted/30 rounded animate-pulse" />
+              ))}
+            </CardContent>
+          </Card>
         </div>
       </AdminLayout>
     );
@@ -133,7 +155,7 @@ const Admin = () => {
           <CardDescription>Access admin panel sections</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/users")}
@@ -141,8 +163,8 @@ const Admin = () => {
             <Users className="w-6 h-6" />
             <span>User Management</span>
           </Button>
-          
-          <Button 
+
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/projects")}
@@ -151,7 +173,7 @@ const Admin = () => {
             <span>Projects Oversight</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/subscriptions")}
@@ -160,7 +182,7 @@ const Admin = () => {
             <span>Subscriptions</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/payments")}
@@ -169,7 +191,7 @@ const Admin = () => {
             <span>Payments</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/plans-management")}
@@ -178,7 +200,7 @@ const Admin = () => {
             <span>Plans Management</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/notifications")}
@@ -187,7 +209,7 @@ const Admin = () => {
             <span>Notifications</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/api")}
@@ -196,7 +218,7 @@ const Admin = () => {
             <span>API Management</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/settings")}
@@ -205,7 +227,7 @@ const Admin = () => {
             <span>Settings</span>
           </Button>
 
-          <Button 
+          <Button
             className="h-auto py-4 flex-col gap-2"
             variant="outline"
             onClick={() => navigate("/admin/logs")}

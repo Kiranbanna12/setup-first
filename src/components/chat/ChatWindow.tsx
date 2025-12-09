@@ -121,17 +121,43 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
               }));
             }
 
+            // Fetch reply context if needed
+            let replyContext = null;
+            if (newMessage.reply_to_message_id) {
+              const { data: replyMsg } = await supabase
+                .from('messages')
+                .select('id, content, sender_id')
+                .eq('id', newMessage.reply_to_message_id)
+                .single();
+
+              if (replyMsg) {
+                // Fetch sender name for reply
+                const { data: replyProfile } = await supabase
+                  .from('profiles')
+                  .select('full_name, email')
+                  .eq('id', replyMsg.sender_id)
+                  .single();
+
+                replyContext = {
+                  ...replyMsg,
+                  sender_name: replyProfile?.full_name || replyProfile?.email || 'User'
+                };
+              }
+            }
+
             const enrichedMessage = {
               ...newMessage,
               sender_name: profile?.full_name || profile?.email || 'Unknown User',
-              sender_avatar: profile?.avatar_url
+              sender_avatar: profile?.avatar_url,
+              reply_to: replyContext
             };
 
             // Add message only if it doesn't already exist (prevent duplicates from optimistic update)
             setMessages(prev => {
               const exists = prev.some(msg => msg.id === newMessage.id);
               if (exists) {
-                // Update existing message with any new data
+                // Update existing message with any new data, preserving reply_to if we didn't fetch it effectively?
+                // Actually enrichedMessage.reply_to is authoritative now.
                 return prev.map(msg => msg.id === newMessage.id ? enrichedMessage : msg);
               }
               return [...prev, enrichedMessage];
@@ -159,7 +185,8 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
                 return {
                   ...updatedMsg,
                   sender_name: msg.sender_name,
-                  sender_avatar: msg.sender_avatar
+                  sender_avatar: msg.sender_avatar,
+                  reply_to: msg.reply_to
                 };
               }
               return msg;
@@ -336,7 +363,14 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
     try {
       const { data: messagesData, error } = await supabase
         .from("messages")
-        .select("*")
+        .select(`
+          *,
+          reply_to:reply_to_message_id(
+            id,
+            content,
+            sender_id
+          )
+        `)
         .eq("project_id", projectId)
         .order("created_at", { ascending: true });
 
@@ -361,11 +395,26 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
       setSenderProfiles(profiles);
 
       // Enrich messages with sender info
-      const enrichedMessages = (messagesData || []).map(msg => ({
-        ...msg,
-        sender_name: profiles[msg.sender_id]?.full_name || profiles[msg.sender_id]?.email || 'Unknown User',
-        sender_avatar: profiles[msg.sender_id]?.avatar_url
-      }));
+      const enrichedMessages = (messagesData || []).map(msg => {
+        // Enrich reply_to with sender info
+        let enrichedReplyTo = null;
+        if (msg.reply_to) {
+          const replySenderId = msg.reply_to.sender_id;
+          enrichedReplyTo = {
+            ...msg.reply_to,
+            sender_name: profiles[replySenderId]?.full_name || profiles[replySenderId]?.email || 'Unknown User'
+          };
+        }
+
+        return {
+          ...msg,
+          // If we have a reply_to via the join, use it. But MessageBubble expects it directly on the message object sometimes or structured differently.
+          // MessageBubble checks `message.reply_to_message_id && message.reply_to`
+          reply_to: enrichedReplyTo,
+          sender_name: profiles[msg.sender_id]?.full_name || profiles[msg.sender_id]?.email || 'Unknown User',
+          sender_avatar: profiles[msg.sender_id]?.avatar_url
+        };
+      });
 
       setMessages(enrichedMessages);
 
@@ -439,6 +488,14 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
         if (error) throw error;
         setEditingMessage(null);
       } else {
+        // Create explicit reply context for optimistic update
+        const replyContext = replyingTo ? {
+          id: replyingTo.id,
+          content: replyingTo.content,
+          sender_id: replyingTo.sender_id,
+          sender_name: replyingTo.sender_name
+        } : null;
+
         // Optimistic update
         const tempMessage = {
           id: `temp-${Date.now()}`,
@@ -447,7 +504,9 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
           project_id: projectId,
           created_at: new Date().toISOString(),
           sender_name: currentUserProfile?.full_name || 'You',
-          is_sending: true
+          is_sending: true,
+          reply_to: replyContext,
+          reply_to_message_id: replyingTo?.id
         };
 
         setMessages(prev => [...prev, tempMessage]);
@@ -477,7 +536,12 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
         // Replace temp message with real one
         setMessages(prev => prev.map(m =>
           m.id === tempMessage.id
-            ? { ...newMessage, sender_name: currentUserProfile?.full_name || 'You', is_sending: false }
+            ? {
+              ...newMessage,
+              sender_name: currentUserProfile?.full_name || 'You',
+              is_sending: false,
+              reply_to: replyContext
+            }
             : m
         ));
 
@@ -639,7 +703,7 @@ export const ChatWindow = ({ projectId, projectName, currentUserId, projectCreat
             <h2 className="font-semibold text-xs sm:text-sm md:text-base truncate">{projectName}</h2>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <p className="text-[10px] sm:text-xs text-muted-foreground">Project Chat</p>
-              <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'} flex-shrink-0`}
+              <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isConnected ? 'bg-success animate-pulse' : 'bg-destructive'} flex-shrink-0`}
                 title={isConnected ? 'Connected' : 'Disconnected'} />
               <span className="text-[10px] sm:text-xs text-muted-foreground truncate">
                 {isConnected

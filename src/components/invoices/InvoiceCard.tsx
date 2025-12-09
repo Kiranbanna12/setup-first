@@ -17,7 +17,9 @@ export interface Invoice {
   proceed_date: string | null;
   paid_date: string | null;
   invoice_number: string | null;
+  due_date?: string | null;
   notes: string | null;
+  monthly_fee?: number;
   created_at: string;
   updated_at: string;
 }
@@ -30,12 +32,12 @@ interface InvoiceCardProps {
   onDownloadPDF: (invoice: Invoice) => void;
 }
 
-export default function InvoiceCard({ 
-  invoice, 
-  onEdit, 
-  onDelete, 
+export default function InvoiceCard({
+  invoice,
+  onEdit,
+  onDelete,
   onProcessPayment,
-  onDownloadPDF 
+  onDownloadPDF
 }: InvoiceCardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {

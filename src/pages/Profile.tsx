@@ -92,6 +92,22 @@ const SUBSCRIPTION_TIERS: Record<string, SubscriptionTierInfo> = {
   }
 };
 
+interface ActiveSubscription {
+  id: string;
+  plan_id: string;
+  status: string;
+  is_trial: boolean;
+  start_date: string;
+  end_date: string;
+  plan?: {
+    name: string;
+    price_inr: number;
+    tier: string;
+    billing_period: string;
+    category: string;
+  };
+}
+
 const Profile = () => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<any>(null);
@@ -100,6 +116,8 @@ const Profile = () => {
   const [fullName, setFullName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [activeSubscription, setActiveSubscription] = useState<ActiveSubscription | null>(null);
+  const [plans, setPlans] = useState<any[]>([]);
 
   useEffect(() => {
     loadProfile();
@@ -114,6 +132,7 @@ const Profile = () => {
       }
 
       try {
+        // Load profile
         const { data: profileData, error } = await supabase
           .from('profiles')
           .select('*')
@@ -133,6 +152,49 @@ const Profile = () => {
         setFullName(mergedProfile.full_name || "");
         setPhoneNumber(mergedProfile.phone_number || "");
         setCompanyName(mergedProfile.company_name || "");
+
+        // Load active subscription with plan details
+        const { data: subData } = await supabase
+          .from('user_subscriptions' as any)
+          .select(`
+            id, plan_id, status, is_trial, start_date, end_date,
+            subscription_plans!inner(name, price_inr, tier, billing_period, user_category)
+          `)
+          .eq('user_id', user.id)
+          .in('status', ['active', 'created', 'pending', 'cancelling'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (subData && subData.length > 0) {
+          const sub = subData[0] as any;
+          setActiveSubscription({
+            id: sub.id,
+            plan_id: sub.plan_id,
+            status: sub.status,
+            is_trial: sub.is_trial,
+            start_date: sub.start_date,
+            end_date: sub.end_date,
+            plan: sub.subscription_plans ? {
+              name: sub.subscription_plans.name,
+              price_inr: sub.subscription_plans.price_inr,
+              tier: sub.subscription_plans.tier,
+              billing_period: sub.subscription_plans.billing_period,
+              category: sub.subscription_plans.user_category || 'editor'
+            } : undefined
+          });
+        } else {
+          setActiveSubscription(null);
+        }
+
+        // Load subscription plans for features
+        const { data: plansData } = await supabase
+          .from('subscription_plans')
+          .select('*');
+
+        if (plansData) {
+          setPlans(plansData);
+        }
+
       } catch (error) {
         console.error("Error fetching profile details:", error);
         // Fallback to basic user info if profile fetch fails
@@ -187,26 +249,55 @@ const Profile = () => {
   };
 
   const getTierInfo = (): SubscriptionTierInfo => {
-    // Check Supabase profile subscription_tier
-    const tier = profile?.subscription_tier || "basic";
-    return SUBSCRIPTION_TIERS[tier] || SUBSCRIPTION_TIERS.basic;
+    // Use active subscription tier if available, else fall back to profile
+    const tier = activeSubscription?.plan?.tier || profile?.subscription_tier || "basic";
+    const staticInfo = SUBSCRIPTION_TIERS[tier] || SUBSCRIPTION_TIERS.basic;
+
+    // Find matching plan from DB using the specific plan_id
+    const dbPlan = activeSubscription?.plan_id
+      ? plans.find(p => p.id === activeSubscription.plan_id)
+      : plans.find(p => p.tier === tier); // Fallback for users without active subscription
+
+    if (dbPlan && dbPlan.features && Array.isArray(dbPlan.features)) {
+      // If we have DB features, use them.
+      // We assume DB features are just strings of *included* features.
+      const features: SubscriptionFeature[] = dbPlan.features.map((f: string) => ({
+        name: f,
+        included: true
+      }));
+
+      return {
+        ...staticInfo,
+        features: features
+      };
+    }
+
+    return staticInfo;
   };
 
   const getCurrentPlanPrice = (): string => {
-    // If we had active_subscription table/json, we'd check that. 
-    // Usually Supabase profiles might retain a price if custom.
-    // For now, return tier default price as per UI requirement.
+    // Use actual subscription price if active subscription exists
+    if (activeSubscription?.plan?.price_inr) {
+      return `₹${activeSubscription.plan.price_inr.toLocaleString()}`;
+    }
     const tierInfo = getTierInfo();
     return tierInfo.price;
   };
 
   const getCurrentPlanName = (): string => {
+    // Use actual subscription plan name if active subscription exists
+    if (activeSubscription?.plan?.name) {
+      return activeSubscription.plan.name;
+    }
     const tierInfo = getTierInfo();
     return tierInfo.name;
   };
 
   const getBillingPeriod = (): string => {
-    // Default to monthly for now unless data suggests otherwise
+    // Use actual billing period from subscription
+    if (activeSubscription?.plan?.billing_period) {
+      return `per ${activeSubscription.plan.billing_period}`;
+    }
     return 'per month';
   };
 
@@ -218,33 +309,111 @@ const Profile = () => {
   };
 
   const getSubscriptionStatus = () => {
-    if (profile?.subscription_active === false) { // Explicit check for false
+    // Use active subscription status if available
+    if (activeSubscription) {
+      if (activeSubscription.status === 'cancelling') {
+        return { text: "Cancelling", color: "text-warning", icon: Clock, bg: "bg-warning/10" };
+      }
+      if (activeSubscription.is_trial) {
+        return { text: "Trial", color: "text-primary", icon: Clock, bg: "bg-primary/10" };
+      }
+      if (activeSubscription.end_date) {
+        const endDate = new Date(activeSubscription.end_date);
+        const daysRemaining = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (daysRemaining <= 7 && daysRemaining > 0) {
+          return { text: "Expiring Soon", color: "text-warning", icon: Clock, bg: "bg-warning/10" };
+        }
+        if (daysRemaining < 0) {
+          return { text: "Expired", color: "text-destructive", icon: XCircle, bg: "bg-destructive/10" };
+        }
+      }
+      return { text: "Active", color: "text-success", icon: CheckCircle2, bg: "bg-success/10" };
+    }
+
+    // Fallback to profile-based check
+    if (profile?.subscription_active === false) {
       return { text: "Inactive", color: "text-destructive", icon: XCircle, bg: "bg-destructive/10" };
     }
-    // Check trial or subscription end date
-    const endDateStr = profile?.trial_end_date || profile?.subscription_end_date;
-    if (endDateStr) {
-      const endDate = new Date(endDateStr);
-      const daysRemaining = Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      if (daysRemaining <= 7 && daysRemaining > 0) {
-        return { text: "Expiring Soon", color: "text-warning", icon: Clock, bg: "bg-warning/10" };
-      }
-      if (daysRemaining < 0) {
-        return { text: "Expired", color: "text-destructive", icon: XCircle, bg: "bg-destructive/10" };
-      }
+    // Free tier
+    if (!profile?.subscription_tier || profile?.subscription_tier === 'basic') {
+      return { text: "Free Plan", color: "text-muted-foreground", icon: User, bg: "bg-muted" };
     }
     return { text: "Active", color: "text-success", icon: CheckCircle2, bg: "bg-success/10" };
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="text-sm text-muted-foreground">Loading profile...</p>
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <header className="flex-shrink-0 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <User className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Profile & Settings</h1>
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 overflow-y-auto">
+            <div className="px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8 max-w-6xl mx-auto w-full">
+              <div className="grid gap-4 sm:gap-6">
+                {/* Profile header skeleton */}
+                <Card className="shadow-elegant border-2">
+                  <CardContent className="pt-4 sm:pt-6">
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+                      <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-muted/50 animate-pulse" />
+                      <div className="flex-1 text-center sm:text-left space-y-3 w-full sm:w-auto">
+                        <div className="h-8 w-48 bg-muted/50 rounded animate-pulse mx-auto sm:mx-0" />
+                        <div className="h-4 w-32 bg-muted/40 rounded animate-pulse mx-auto sm:mx-0" />
+                        <div className="flex gap-2 justify-center sm:justify-start">
+                          <div className="h-6 w-24 bg-muted/50 rounded-full animate-pulse" />
+                          <div className="h-6 w-20 bg-muted/40 rounded-full animate-pulse" />
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Form skeleton */}
+                <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
+                  <div className="lg:col-span-2">
+                    <Card className="shadow-elegant">
+                      <CardHeader>
+                        <div className="h-5 w-40 bg-muted/50 rounded animate-pulse" />
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div key={i} className="space-y-2">
+                            <div className="h-4 w-24 bg-muted/40 rounded animate-pulse" />
+                            <div className="h-10 w-full bg-muted/30 rounded animate-pulse" />
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  </div>
+                  <Card className="shadow-elegant">
+                    <CardHeader>
+                      <div className="h-5 w-28 bg-muted/50 rounded animate-pulse" />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="h-12 w-full bg-muted/40 rounded animate-pulse" />
+                      <div className="h-20 w-full bg-muted/30 rounded animate-pulse" />
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </div>
+          </main>
         </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   const tierInfo = getTierInfo();
@@ -296,16 +465,16 @@ const Profile = () => {
                           <p className="text-xs sm:text-sm text-muted-foreground truncate">{profile?.email}</p>
                         </div>
                         <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                          <Badge className={cn("gap-1 text-xs sm:text-sm", tierInfo.color)}>
+                          <Badge className={cn("gap-1 text-xs sm:text-sm", activeSubscription ? "bg-primary" : tierInfo.color)}>
                             <Crown className="w-3 h-3 sm:w-4 sm:h-4" />
-                            {tierInfo.badge}
+                            {activeSubscription?.plan?.name || tierInfo.badge}
                           </Badge>
                           <Badge variant="outline" className={cn("gap-1 text-xs sm:text-sm", status.bg, status.color)}>
                             <StatusIcon className="w-3 h-3 sm:w-4 sm:h-4" />
                             {status.text}
                           </Badge>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 pt-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 pt-2">
                           <div className="text-center sm:text-left">
                             <p className="text-xs text-muted-foreground">Member Since</p>
                             <p className="text-xs sm:text-sm font-semibold">
@@ -313,15 +482,25 @@ const Profile = () => {
                             </p>
                           </div>
                           <div className="text-center sm:text-left">
+                            <p className="text-xs text-muted-foreground">Category</p>
+                            <p className="text-xs sm:text-sm font-semibold capitalize">
+                              {activeSubscription?.plan?.category || profile?.user_category || 'editor'}
+                            </p>
+                          </div>
+                          <div className="text-center sm:text-left">
                             <p className="text-xs text-muted-foreground">Plan</p>
                             <p className="text-xs sm:text-sm font-semibold capitalize">{getCurrentPlanName()}</p>
                           </div>
-                          {(profile?.subscription_tier === 'pro' || profile?.subscription_tier === 'premium') && (
+                          {activeSubscription && (
                             <div className="text-center sm:text-left col-span-2 sm:col-span-1">
-                              <p className="text-xs text-muted-foreground">Next Billing</p>
+                              <p className="text-xs text-muted-foreground">
+                                {activeSubscription.status === 'cancelling' ? 'Access Until' :
+                                  (activeSubscription.is_trial ? 'Trial Ends' : 'Next Billing')}
+                              </p>
                               <p className="text-xs sm:text-sm font-semibold">
-                                {profile?.trial_end_date ? format(new Date(profile.trial_end_date), "dd MMM yyyy") :
-                                  (profile?.subscription_end_date ? format(new Date(profile.subscription_end_date), "dd MMM yyyy") : "N/A")}
+                                {activeSubscription.end_date
+                                  ? format(new Date(activeSubscription.end_date), "dd MMM yyyy")
+                                  : "N/A"}
                               </p>
                             </div>
                           )}

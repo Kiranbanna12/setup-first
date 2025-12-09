@@ -33,6 +33,7 @@ interface Payment {
   billing_period: string;
   payment_date: string;
   subscription_id?: string;
+  user_category?: string;
 }
 
 const BillingHistory = () => {
@@ -61,35 +62,79 @@ const BillingHistory = () => {
       }
 
       try {
-        // Load user's payment history from Supabase
         const userId = session.user.id;
-        const { data: paymentsData, error: paymentsError } = await supabase
+        const allTransactions: Payment[] = [];
+
+        // Load user's payment history
+        const { data: paymentsData } = await supabase
           .from('payments')
           .select('*')
-          .or(`payer_id.eq.${userId},recipient_id.eq.${userId}`)
+          .eq('user_id', userId)
           .order('created_at', { ascending: false });
 
-        if (paymentsError) {
-          console.error("Payments query error:", paymentsError);
-          setPayments([]);
-        } else if (paymentsData && paymentsData.length > 0) {
-          // Transform payments data to match the interface
-          const transformedPayments: Payment[] = paymentsData.map((payment: any) => ({
-            id: payment.id,
-            payment_id: payment.id.slice(0, 12),
-            amount: payment.amount,
-            currency: 'INR',
-            status: payment.status === 'paid' ? 'captured' : payment.status,
-            plan_name: payment.payment_type === 'freelance' ? 'Project Payment' : 'Salary Payment',
-            tier: 'subscription',
-            billing_period: 'one-time',
-            payment_date: payment.created_at,
-            subscription_id: undefined
-          }));
-          setPayments(transformedPayments);
-        } else {
-          setPayments([]);
+        // Load user's subscription history with plan details
+        const { data: subsData } = await supabase
+          .from('user_subscriptions' as any)
+          .select(`
+            id, status, is_trial, start_date, end_date, created_at,
+            subscription_plans!inner(name, tier, billing_period, price_inr, user_category)
+          `)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+
+        // Add payments to transactions
+        if (paymentsData && paymentsData.length > 0) {
+          paymentsData.forEach((payment: any) => {
+            allTransactions.push({
+              id: payment.id,
+              payment_id: payment.id.slice(0, 12),
+              amount: payment.amount,
+              currency: 'INR',
+              status: payment.status === 'paid' ? 'captured' : payment.status,
+              plan_name: 'Payment',
+              tier: 'payment',
+              billing_period: 'one-time',
+              payment_date: payment.created_at,
+              subscription_id: payment.subscription_id
+            });
+          });
         }
+
+        // Add subscriptions to transactions (as billing records)
+        if (subsData && subsData.length > 0) {
+          subsData.forEach((sub: any) => {
+            const planInfo = sub.subscription_plans;
+            const statusMap: Record<string, "captured" | "pending" | "failed"> = {
+              'active': 'captured',
+              'created': 'pending',
+              'pending': 'pending',
+              'cancelling': 'captured',
+              'cancelled': 'failed',
+              'expired': 'failed'
+            };
+
+            allTransactions.push({
+              id: `sub_${sub.id}`,
+              payment_id: sub.id.slice(0, 12),
+              amount: sub.is_trial ? 1 : (planInfo?.price_inr || 0),
+              currency: 'INR',
+              status: statusMap[sub.status] || 'pending',
+              plan_name: planInfo?.name || 'Subscription',
+              tier: planInfo?.tier || 'subscription',
+              billing_period: sub.is_trial ? 'Trial' : (planInfo?.billing_period || 'monthly'),
+              payment_date: sub.created_at,
+              subscription_id: sub.id,
+              user_category: planInfo?.user_category || 'editor'
+            });
+          });
+        }
+
+        // Sort all transactions by date (newest first)
+        allTransactions.sort((a, b) =>
+          new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
+        );
+
+        setPayments(allTransactions);
       } catch (error) {
         console.error("Failed to load payments:", error);
         setPayments([]);
@@ -166,10 +211,116 @@ const BillingHistory = () => {
 
   const handleDownloadInvoice = (payment: Payment) => {
     toast.info("Generating invoice...");
-    // In production, this would call an API to generate the invoice
-    setTimeout(() => {
-      toast.success(`Invoice for ${payment.plan_name} is ready!`);
-    }, 1000);
+
+    const invoiceDate = format(new Date(payment.payment_date), "dd MMM yyyy");
+    const invoiceNumber = `INV-${payment.payment_id.toUpperCase()}`;
+
+    // Create invoice HTML
+    const invoiceHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Invoice - ${invoiceNumber}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; background: #f5f5f5; }
+          .invoice { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #22c55e; padding-bottom: 20px; }
+          .logo { font-size: 28px; font-weight: bold; color: #22c55e; }
+          .logo span { color: #333; }
+          .invoice-info { text-align: right; }
+          .invoice-info h2 { font-size: 24px; color: #333; margin-bottom: 8px; }
+          .invoice-info p { color: #666; font-size: 14px; }
+          .section { margin-bottom: 30px; }
+          .section-title { font-size: 14px; font-weight: 600; color: #666; text-transform: uppercase; margin-bottom: 10px; }
+          .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+          .detail-box p { margin: 5px 0; color: #333; }
+          .detail-box strong { color: #111; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th { background: #f8f8f8; padding: 12px; text-align: left; font-size: 14px; color: #666; border-bottom: 2px solid #eee; }
+          td { padding: 16px 12px; border-bottom: 1px solid #eee; color: #333; }
+          .amount { text-align: right; font-weight: 600; }
+          .total-row td { font-size: 18px; font-weight: bold; border-top: 2px solid #22c55e; padding-top: 20px; }
+          .status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+          .status.paid { background: #dcfce7; color: #166534; }
+          .status.pending { background: #fef3c7; color: #92400e; }
+          .status.failed { background: #fee2e2; color: #dc2626; }
+          .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #666; font-size: 12px; }
+          @media print { body { padding: 0; background: white; } .invoice { box-shadow: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="invoice">
+          <div class="header">
+            <div class="logo">Xrozen<span>Workflow</span></div>
+            <div class="invoice-info">
+              <h2>INVOICE</h2>
+              <p><strong>${invoiceNumber}</strong></p>
+              <p>Date: ${invoiceDate}</p>
+            </div>
+          </div>
+          
+          <div class="section">
+            <div class="details-grid">
+              <div class="detail-box">
+                <div class="section-title">From</div>
+                <p><strong>Xrozen Workflow</strong></p>
+                <p>Subscription Services</p>
+                <p>support@xrozen.com</p>
+              </div>
+              <div class="detail-box">
+                <div class="section-title">Invoice To</div>
+                <p><strong>Customer</strong></p>
+                <p>Transaction ID: ${payment.id}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="section">
+            <div class="section-title">Invoice Details</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Period</th>
+                  <th>Status</th>
+                  <th class="amount">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>${payment.user_category ? `${payment.user_category.charAt(0).toUpperCase() + payment.user_category.slice(1)} ` : ''}${payment.plan_name}</strong></td>
+                  <td>${payment.billing_period}</td>
+                  <td><span class="status ${payment.status === 'captured' ? 'paid' : payment.status}">${payment.status === 'captured' ? 'Paid' : payment.status}</span></td>
+                  <td class="amount">₹${payment.amount.toLocaleString()}</td>
+                </tr>
+                <tr class="total-row">
+                  <td colspan="3">Total</td>
+                  <td class="amount">₹${payment.amount.toLocaleString()} ${payment.currency}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          
+          <div class="footer">
+            <p>Thank you for your business!</p>
+            <p style="margin-top: 8px;">This is a computer-generated invoice and does not require a signature.</p>
+          </div>
+        </div>
+        <script>window.print();</script>
+      </body>
+      </html>
+    `;
+
+    // Open invoice in new window
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(invoiceHTML);
+      printWindow.document.close();
+      toast.success(`Invoice ${invoiceNumber} generated!`);
+    } else {
+      toast.error("Please allow popups to download invoice");
+    }
   };
 
   const calculateTotal = () => {
@@ -178,15 +329,58 @@ const BillingHistory = () => {
       .reduce((sum, p) => sum + p.amount, 0);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="text-sm text-muted-foreground">Loading billing history...</p>
+  // Skeleton loading component  
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <header className="flex-shrink-0 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <SidebarTrigger />
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <Receipt className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-lg lg:text-xl font-bold truncate">Billing History</h1>
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 overflow-y-auto">
+            <div className="px-4 lg:px-8 py-6 max-w-7xl mx-auto w-full">
+              <div className="grid gap-6">
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[1, 2, 3].map((i) => (
+                    <Card key={i} className="shadow-elegant">
+                      <CardHeader className="pb-3">
+                        <div className="h-4 w-24 bg-muted/40 rounded animate-pulse" />
+                        <div className="h-8 w-32 bg-muted/50 rounded animate-pulse mt-2" />
+                      </CardHeader>
+                    </Card>
+                  ))}
+                </div>
+                <Card className="shadow-elegant">
+                  <CardHeader>
+                    <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="h-16 w-full bg-muted/30 rounded animate-pulse" />
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </main>
         </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -346,10 +540,6 @@ const BillingHistory = () => {
                                   <span className="flex items-center gap-1">
                                     <Calendar className="w-3 h-3" />
                                     {format(new Date(payment.payment_date), "MMM dd, yyyy")}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <CreditCard className="w-3 h-3" />
-                                    Supabase
                                   </span>
                                   <span className="text-[10px] sm:text-xs text-muted-foreground/70">
                                     ID: {payment.payment_id}

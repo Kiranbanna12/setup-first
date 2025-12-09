@@ -638,9 +638,47 @@ export default function VideoPreview() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <SidebarProvider>
+        <div className="flex w-full min-h-screen">
+          <AppSidebar />
+          <div className="flex-1 bg-background">
+            <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+              <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2">
+                <div className="flex items-center gap-4">
+                  <div className="h-9 w-32 bg-muted/50 rounded animate-pulse" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-12 bg-muted/40 rounded animate-pulse" />
+                </div>
+              </div>
+            </header>
+            <main className="px-4 sm:px-6 lg:px-8 py-6">
+              <div className="mb-6">
+                <div className="h-8 w-64 bg-muted/50 rounded animate-pulse mb-2" />
+                <div className="h-4 w-40 bg-muted/40 rounded animate-pulse" />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <Card className="shadow-elegant">
+                    <div className="aspect-video bg-muted/30 rounded animate-pulse" />
+                  </Card>
+                </div>
+                <div className="lg:col-span-1">
+                  <Card className="shadow-elegant">
+                    <CardHeader>
+                      <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                    </CardHeader>
+                    <div className="p-4 space-y-3">
+                      <div className="h-20 w-full bg-muted/30 rounded animate-pulse" />
+                      <div className="h-9 w-full bg-muted/40 rounded animate-pulse" />
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
     );
   }
 

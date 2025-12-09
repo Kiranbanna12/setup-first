@@ -201,12 +201,60 @@ const SharedProject = () => {
         );
     };
 
+    // Skeleton loading component
+    const LoadingSkeleton = () => (
+        <div className="min-h-screen bg-background dark:bg-background">
+            <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+                <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary/50 animate-pulse" />
+                        <div>
+                            <div className="h-6 w-40 bg-muted/50 rounded animate-pulse mb-1" />
+                            <div className="h-4 w-24 bg-muted/40 rounded animate-pulse" />
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 max-w-7xl mx-auto">
+                <div className="mb-6">
+                    <div className="h-8 w-64 bg-muted/50 rounded animate-pulse mb-2" />
+                    <div className="h-4 w-96 bg-muted/40 rounded animate-pulse" />
+                </div>
+                <Card className="shadow-elegant mb-4">
+                    <CardContent className="pt-6">
+                        <div className="h-16 w-full bg-muted/30 rounded animate-pulse" />
+                    </CardContent>
+                </Card>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {[1, 2].map((i) => (
+                        <Card key={i} className="shadow-elegant">
+                            <CardHeader className="pb-3">
+                                <div className="h-4 w-24 bg-muted/50 rounded animate-pulse" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" />
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+                <Card className="shadow-elegant mt-6">
+                    <CardHeader>
+                        <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-3">
+                            {[1, 2].map((i) => (
+                                <div key={i} className="h-20 w-full bg-muted/30 rounded animate-pulse" />
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+            </main>
+        </div>
+    );
+
     if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background dark:bg-background">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-            </div>
-        );
+        return <LoadingSkeleton />;
     }
 
     if (!project || !shareInfo) {
@@ -215,7 +263,7 @@ const SharedProject = () => {
 
     // Main content component
     const ProjectContent = () => (
-        <div className="min-h-screen bg-background dark:bg-background">
+        <div className="min-h-screen bg-zinc-950 text-white dark">
             {/* Header */}
             <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
                 <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">

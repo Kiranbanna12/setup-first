@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     Crown, CreditCard, User, Zap, CheckCircle2, XCircle, AlertCircle,
-    Calendar, ArrowRight, Plus, Trash2, Star, Shield, Clock,
-    Sparkles, Loader2, ArrowLeft
+    ArrowRight, Star,
+    Sparkles, Loader2, ArrowLeft, Gift
 } from "lucide-react";
 import { toast } from "sonner";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -32,48 +32,40 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-interface PaymentMethod {
+declare global {
+    interface Window {
+        Razorpay: any;
+    }
+}
+
+interface UserSubscription {
     id: string;
-    type: string;
-    last4: string;
-    brand: string;
-    expiry: string;
-    is_default: boolean;
+    plan_id: string;
+    status: string;
+    is_trial: boolean;
+    start_date: string;
+    end_date: string;
+    razorpay_subscription_id: string;
 }
 
 const SubscriptionManagement = () => {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState<any>(null);
-    const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
     const [processing, setProcessing] = useState(false);
     const [selectedCategory, setSelectedCategory] = useState("editor");
     const [billingPeriod, setBillingPeriod] = useState("monthly");
     const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
     const [isTrialEligible, setIsTrialEligible] = useState(false);
-    const [hasAnySubscription, setHasAnySubscription] = useState(false);
+    const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+    const [activeSubscription, setActiveSubscription] = useState<UserSubscription | null>(null);
     const { plans: allPlans, loading: plansLoading } = usePlans();
-    const { formatPrice, currency, currencyInfo } = useCurrency();
+    const { formatPrice } = useCurrency();
 
     const categories = [
-        {
-            id: "editor",
-            name: "Editor",
-            icon: Sparkles,
-            description: "For individual video editors"
-        },
-        {
-            id: "client",
-            name: "Client",
-            icon: Crown,
-            description: "For clients managing projects"
-        },
-        {
-            id: "agency",
-            name: "Agency",
-            icon: Zap,
-            description: "For teams and agencies"
-        }
+        { id: "editor", name: "Editor", icon: Sparkles, description: "For individual video editors" },
+        { id: "client", name: "Client", icon: Crown, description: "For clients managing projects" },
+        { id: "agency", name: "Agency", icon: Zap, description: "For teams and agencies" }
     ];
 
     useEffect(() => {
@@ -88,30 +80,39 @@ const SubscriptionManagement = () => {
                 return;
             }
 
-            try {
-                const { data: profileData } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', session.user.id)
-                    .single();
+            // Load profile
+            const { data: profileData } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
 
-                if (profileData) {
-                    setProfile(profileData);
-
-                    // Check trial eligibility
-                    const hasActiveOrPastSub = profileData?.subscription_active ||
-                        (profileData?.subscription_tier && profileData.subscription_tier !== 'basic');
-                    setHasAnySubscription(!!hasActiveOrPastSub);
-                    setIsTrialEligible(!hasActiveOrPastSub);
-                }
-            } catch (error) {
-                setProfile({ ...session.user });
-                setIsTrialEligible(true); // First time user
-                setHasAnySubscription(false);
+            if (profileData) {
+                setProfile(profileData);
+                setIsTrialEligible(!(profileData as any)?.trial_used);
+                setHasActiveSubscription((profileData as any)?.subscription_active === true);
             }
 
-            // Load payment methods (mock for now)
-            setPaymentMethods([]);
+            // Load active subscription
+            const { data: subData } = await supabase
+                .from('user_subscriptions' as any)
+                .select('*')
+                .eq('user_id', session.user.id)
+                .in('status', ['active', 'created', 'pending', 'cancelling'])
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (subData && subData.length > 0) {
+                const sub = subData[0] as unknown as UserSubscription;
+                setActiveSubscription(sub);
+
+                // Set active flag if profile says active OR if subscription is cancelling (feature access depends on this)
+                const isProfileActive = (profileData as any)?.subscription_active === true;
+                setHasActiveSubscription(isProfileActive || sub.status === 'cancelling');
+            } else {
+                setActiveSubscription(null);
+                setHasActiveSubscription((profileData as any)?.subscription_active === true);
+            }
         } catch (error: any) {
             console.error("Load data error:", error);
             toast.error("Failed to load data");
@@ -120,181 +121,285 @@ const SubscriptionManagement = () => {
         }
     };
 
-    const handleUpgrade = async (tier: string) => {
-        if (tier === profile?.subscription_tier) {
-            toast.info("You are already on this plan");
-            return;
-        }
-
-        // Find the plan with this tier
-        const plan = allPlans.find(p => p.tier === tier && p.category === profile?.user_category);
-        if (plan) {
-            await initiateRazorpayPayment(plan);
-        } else {
-            toast.error("Plan not found");
-        }
-    };
-
-    const handleCancelSubscription = async () => {
-        setProcessing(true);
-        try {
-            const { error } = await supabase
-                .from('profiles')
-                .update({
-                    subscription_active: false,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', profile.id);
-
-            if (error) throw error;
-
-            toast.success("Subscription cancelled. It will remain active until the end of the billing period.");
-            await loadData();
-        } catch (error: any) {
-            toast.error(error.message || "Failed to cancel subscription");
-        } finally {
-            setProcessing(false);
-        }
-    };
-
-    const initiateRazorpayPayment = async (plan: any) => {
-        setProcessing(true);
-        setSelectedPlan(plan.id);
-
-        try {
-            // Get Razorpay config
-            const { data: config } = await supabase
-                .from("app_settings" as any)
-                .select("value")
-                .eq("key", "razorpay_config")
-                .single();
-
-            if (!config || !("value" in config) || !(config.value as any).key_id) {
-                toast.error("Payment gateway not configured. Please contact admin.");
-                setProcessing(false);
-                setSelectedPlan(null);
+    const loadRazorpayScript = (): Promise<boolean> => {
+        return new Promise((resolve) => {
+            if (window.Razorpay) {
+                resolve(true);
                 return;
             }
-
-            const razorpayKeyId = (config.value as any).key_id;
-
-            // Create order via edge function
-            const { data: order, error: orderError } = await supabase.functions.invoke("create-razorpay-order", {
-                body: { amount: plan.price, planId: plan.id }
-            });
-
-            if (orderError) throw orderError;
-
-            // Load Razorpay script if not already loaded
-            if (!(window as any).Razorpay) {
-                const script = document.createElement('script');
-                script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-                script.async = true;
-                document.body.appendChild(script);
-                await new Promise(resolve => script.onload = resolve);
-            }
-
-            // Initialize Razorpay
-            const options = {
-                key: razorpayKeyId,
-                amount: plan.price * 100, // Amount in paise
-                currency: "INR",
-                name: "Xrozen Workflow",
-                description: `${plan.name} - ${plan.billing_period}`,
-                order_id: order.id,
-                handler: async (response: any) => {
-                    await verifyPaymentAndActivate(response, plan);
-                },
-                prefill: {
-                    email: profile?.email || ""
-                },
-                theme: {
-                    color: "#6366f1"
-                }
-            };
-
-            const razorpay = new (window as any).Razorpay(options);
-            razorpay.on('payment.failed', (response: any) => {
-                toast.error("Payment failed. Please try again.");
-                setProcessing(false);
-                setSelectedPlan(null);
-            });
-            razorpay.open();
-        } catch (error: any) {
-            console.error("Payment initiation error:", error);
-            toast.error(error.message || "Failed to initiate payment");
-            setProcessing(false);
-            setSelectedPlan(null);
-        }
+            const script = document.createElement('script');
+            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            script.async = true;
+            script.onload = () => resolve(true);
+            script.onerror = () => resolve(false);
+            document.body.appendChild(script);
+        });
     };
 
-    const verifyPaymentAndActivate = async (paymentResponse: any, plan: any) => {
-        try {
-            // Verify payment via edge function
-            const { error: verifyError } = await supabase.functions.invoke("verify-razorpay-payment", {
-                body: paymentResponse
-            });
-
-            if (verifyError) throw verifyError;
-
-            // Payment verified - now activate subscription
-            const endDate = new Date();
-            if (plan.billing_period === 'monthly') {
-                endDate.setMonth(endDate.getMonth() + 1);
-            } else {
-                endDate.setFullYear(endDate.getFullYear() + 1);
-            }
-
-            const { error: updateError } = await supabase
-                .from('profiles')
-                .update({
-                    subscription_tier: plan.tier,
-                    subscription_active: true,
-                    billing_period: plan.billing_period,
-                    subscription_end_date: endDate.toISOString(),
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', profile.id);
-
-            if (updateError) throw updateError;
-
-            toast.success("Payment successful! Subscription activated.");
-            await loadData();
-        } catch (error: any) {
-            console.error("Payment verification error:", error);
-            toast.error(error.message || "Payment verification failed");
-        } finally {
-            setProcessing(false);
-            setSelectedPlan(null);
-        }
-    };
-
-    const handleSubscribe = async (planId: string) => {
+    const handleSubscribe = async (planId: string, isTrial: boolean = false) => {
         if (!profile) {
             toast.error("Please login to subscribe");
             navigate("/auth");
             return;
         }
 
-        const plan = allPlans.find(p => p.id === planId);
-        if (plan) {
-            await initiateRazorpayPayment(plan);
-        } else {
-            toast.error("Plan not found");
+        setProcessing(true);
+        setSelectedPlan(planId);
+
+        try {
+            // Load Razorpay script
+            const loaded = await loadRazorpayScript();
+            if (!loaded) {
+                throw new Error('Failed to load payment gateway');
+            }
+
+            // Get plan details
+            const plan = allPlans.find(p => p.id === planId);
+            const useTrial = isTrial && isTrialEligible;
+
+            // For trial, use ₹1 order API instead of subscription API
+            if (useTrial) {
+                // Create ₹1 order for trial verification
+                const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
+                    body: {
+                        planId,
+                        isTrial: true,
+                        amount: 1 // ₹1 trial fee
+                    }
+                });
+
+                if (error) throw error;
+                if (!data) throw new Error('No response from server');
+
+                // Open Razorpay checkout with ₹1
+                const options = {
+                    key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+                    order_id: data.order_id,
+                    amount: 100, // ₹1 in paise
+                    currency: 'INR',
+                    name: 'Xrozen Workflow',
+                    description: `${plan?.name} - ₹1 Trial (First Month)`,
+                    prefill: {
+                        email: profile?.email || '',
+                        contact: ''
+                    },
+                    theme: { color: '#22c55e' },
+                    handler: async (response: any) => {
+                        try {
+                            const { error: verifyError } = await supabase.functions.invoke('verify-razorpay-payment', {
+                                body: {
+                                    ...response,
+                                    isTrial: true,
+                                    planId: planId
+                                }
+                            });
+
+                            if (verifyError) throw verifyError;
+
+                            toast.success('Trial activated! You will be charged ₹1 now and full price next month.');
+                            await loadData();
+                        } catch (error: any) {
+                            console.error("Verification error:", error);
+                            toast.error("Payment successful but verification failed. Please contact support.");
+                        }
+                    },
+                    modal: {
+                        ondismiss: () => {
+                            setProcessing(false);
+                            setSelectedPlan(null);
+                        }
+                    }
+                };
+
+                const razorpay = new window.Razorpay(options);
+                razorpay.on('payment.failed', (response: any) => {
+                    console.error('Payment failed:', response.error);
+                    toast.error('Payment failed. Please try again.');
+                    setProcessing(false);
+                    setSelectedPlan(null);
+                });
+                razorpay.open();
+            } else {
+                // Regular subscription (non-trial) - use subscription API
+                const { data, error } = await supabase.functions.invoke('create-razorpay-subscription', {
+                    body: { planId, isTrial: false }
+                });
+
+                if (error) throw error;
+                if (!data) throw new Error('No response from server');
+
+                // Open Razorpay checkout
+                const options = {
+                    key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+                    subscription_id: data.subscription_id,
+                    name: 'Xrozen Workflow',
+                    description: `${plan?.name} - Monthly Subscription`,
+                    prefill: {
+                        email: profile?.email || '',
+                        contact: ''
+                    },
+                    theme: { color: '#22c55e' },
+                    handler: async (response: any) => {
+                        try {
+                            const { error: verifyError } = await supabase.functions.invoke('verify-razorpay-payment', {
+                                body: response
+                            });
+
+                            if (verifyError) throw verifyError;
+
+                            toast.success('Subscription activated successfully!');
+                            await loadData();
+                        } catch (error: any) {
+                            console.error("Verification error:", error);
+                            toast.error("Payment successful but verification failed. Please contact support.");
+                        }
+                    },
+                    modal: {
+                        ondismiss: () => {
+                            setProcessing(false);
+                            setSelectedPlan(null);
+                        }
+                    }
+                };
+
+                const razorpay = new window.Razorpay(options);
+                razorpay.on('payment.failed', (response: any) => {
+                    console.error('Payment failed:', response.error);
+                    toast.error('Payment failed. Please try again.');
+                    setProcessing(false);
+                    setSelectedPlan(null);
+                });
+                razorpay.open();
+            }
+        } catch (error: any) {
+            console.error("Subscription error:", error);
+            toast.error(error.message || "Failed to create subscription");
+            setProcessing(false);
+            setSelectedPlan(null);
         }
     };
 
-    const handleSetDefaultPayment = async (id: string) => {
-        toast.info("Default payment method updated");
+    const handleCancelSubscription = async () => {
+        if (!activeSubscription) {
+            toast.error("No active subscription found");
+            return;
+        }
+
+        setProcessing(true);
+        try {
+            const { data, error } = await supabase.functions.invoke('cancel-subscription', {
+                body: {
+                    subscriptionId: activeSubscription.id,
+                    cancelAtEnd: true // Cancel at end of billing period
+                }
+            });
+
+            if (error) throw error;
+            if (!data) throw new Error('No response from server');
+
+            toast.success(data.message || "Subscription updated successfully.");
+            await loadData(); // Reload to get updated status
+        } catch (error: any) {
+            console.error("Cancel error:", error);
+            toast.error(error.message || "Failed to cancel subscription");
+        } finally {
+            setProcessing(false);
+        }
     };
 
-    const handleRemovePayment = async (id: string) => {
-        toast.info("Payment method removed");
+    const handleResumeSubscription = async () => {
+        if (!activeSubscription || activeSubscription.status !== 'cancelling') {
+            toast.error("No cancelling subscription found to resume");
+            return;
+        }
+
+        setProcessing(true);
+        const currentPlan = allPlans.find(p => p.id === activeSubscription.plan_id);
+
+        if (!currentPlan) {
+            toast.error("Original plan not found. Please subscribe to a new plan.");
+            setProcessing(false);
+            return;
+        }
+
+        try {
+            // Load Razorpay script
+            const loaded = await loadRazorpayScript();
+            if (!loaded) {
+                throw new Error('Failed to load payment gateway');
+            }
+
+            // Create a ₹1 order for resume verification (not full subscription)
+            const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
+                body: {
+                    planId: activeSubscription.plan_id,
+                    isTrial: false,
+                    isResume: true, // Flag to indicate this is a resume verification
+                    subscriptionId: activeSubscription.id
+                }
+            });
+
+            if (error) throw error;
+            if (!data) throw new Error('No response from server');
+
+            // Open Razorpay checkout with ₹1 amount
+            const options = {
+                key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+                order_id: data.order_id,
+                amount: 100, // ₹1 in paise
+                currency: 'INR',
+                name: 'Xrozen Workflow',
+                description: `Resume ${currentPlan.name} - Verification Fee`,
+                prefill: {
+                    email: profile?.email || '',
+                    contact: ''
+                },
+                theme: { color: '#22c55e' },
+                handler: async (response: any) => {
+                    try {
+                        // Verify the payment and resume subscription
+                        const { error: verifyError } = await supabase.functions.invoke('verify-razorpay-payment', {
+                            body: {
+                                ...response,
+                                isResume: true,
+                                subscriptionId: activeSubscription.id
+                            }
+                        });
+
+                        if (verifyError) throw verifyError;
+
+                        toast.success('Subscription resumed successfully!');
+                        await loadData();
+                    } catch (error: any) {
+                        console.error("Verification error:", error);
+                        toast.error("Payment successful but verification failed.");
+                    }
+                },
+                modal: {
+                    ondismiss: () => {
+                        setProcessing(false);
+                        setSelectedPlan(null);
+                    }
+                }
+            };
+
+            const razorpay = new window.Razorpay(options);
+            razorpay.on('payment.failed', (response: any) => {
+                console.error('Payment failed:', response.error);
+                toast.error('Payment failed. Please try again.');
+                setProcessing(false);
+            });
+            razorpay.open();
+
+        } catch (error: any) {
+            console.error("Resume error:", error);
+            toast.error(error.message || "Failed to resume subscription");
+            setProcessing(false);
+        }
     };
 
     const currentTier = profile?.subscription_tier || "basic";
-    const hasActiveSubscription = profile?.subscription_active === true;
-    const currentCategory = profile?.user_category;
+    const currentCategory = profile?.user_category || "editor";
 
     const getPlansByCategory = (category: string) => {
         return allPlans.filter(plan => plan.category === category);
@@ -304,20 +409,96 @@ const SubscriptionManagement = () => {
         plan.billing_period === billingPeriod
     );
 
-    const isPlanPopular = (planTier: string) => {
-        return planTier === 'pro';
-    };
+    const isPlanPopular = (planTier: string) => planTier === 'pro';
 
-    if (loading || plansLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background">
-                <div className="text-center space-y-4">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-                    <p className="text-sm text-muted-foreground">Loading subscription details...</p>
+    // Skeleton loading component
+    const LoadingSkeleton = () => (
+        <SidebarProvider>
+            <div className="flex w-full min-h-screen bg-background">
+                <AppSidebar />
+                <div className="flex-1 flex flex-col overflow-hidden">
+                    <header className="flex-shrink-0 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+                        <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+                            <SidebarTrigger />
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                                    <CreditCard className="w-5 h-5 text-primary-foreground" />
+                                </div>
+                                <h1 className="text-lg lg:text-xl font-bold truncate">Subscription Management</h1>
+                            </div>
+                        </div>
+                    </header>
+                    <main className="flex-1 overflow-y-auto">
+                        <div className="px-4 lg:px-8 py-6 max-w-7xl mx-auto w-full">
+                            <div className="grid gap-6">
+                                <Card className="shadow-elegant border-2">
+                                    <CardHeader>
+                                        <div className="h-6 w-48 bg-muted/50 rounded animate-pulse" />
+                                        <div className="h-4 w-32 bg-muted/40 rounded animate-pulse mt-2" />
+                                    </CardHeader>
+                                    <CardContent className="space-y-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 bg-muted/50 rounded-lg animate-pulse" />
+                                            <div className="space-y-2">
+                                                <div className="h-7 w-24 bg-muted/50 rounded animate-pulse" />
+                                                <div className="h-4 w-20 bg-muted/40 rounded animate-pulse" />
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <div className="space-y-4">
+                                    <div className="h-6 w-32 bg-muted/50 rounded animate-pulse" />
+                                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                        {[1, 2, 3].map((i) => (
+                                            <Card key={i} className="shadow-elegant">
+                                                <CardHeader>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="w-12 h-12 bg-muted/50 rounded-lg animate-pulse" />
+                                                    </div>
+                                                    <div className="h-7 w-32 bg-muted/50 rounded animate-pulse mt-4" />
+                                                    <div className="h-8 w-24 bg-muted/40 rounded animate-pulse mt-2" />
+                                                </CardHeader>
+                                                <CardContent className="space-y-3">
+                                                    {[1, 2, 3].map((j) => (
+                                                        <div key={j} className="h-4 w-full bg-muted/30 rounded animate-pulse" />
+                                                    ))}
+                                                    <div className="h-10 w-full bg-muted/40 rounded animate-pulse mt-4" />
+                                                </CardContent>
+                                            </Card>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
                 </div>
             </div>
-        );
+        </SidebarProvider>
+    );
+
+    if (loading || plansLoading) {
+        return <LoadingSkeleton />;
     }
+
+    const getStatusBadge = () => {
+        if (!hasActiveSubscription) return null;
+
+        if (activeSubscription?.status === 'cancelling') {
+            return (
+                <Badge className="bg-orange-500 text-white hover:bg-orange-600 text-xs sm:text-sm border-0">
+                    <AlertCircle className="w-3 h-3 mr-1" />
+                    Cancelling
+                </Badge>
+            );
+        }
+
+        return (
+            <Badge className="bg-success text-xs sm:text-sm">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                {activeSubscription?.is_trial ? 'Trial Active' : 'Active'}
+            </Badge>
+        );
+    };
 
     return (
         <SidebarProvider>
@@ -334,7 +515,7 @@ const SubscriptionManagement = () => {
                                 <div className="min-w-0 flex-1">
                                     <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Subscription Management</h1>
                                     <p className="text-xs sm:text-sm text-muted-foreground truncate hidden sm:block">
-                                        Manage your plan and payment methods
+                                        Manage your plan and billing
                                     </p>
                                 </div>
                                 <CurrencySelector />
@@ -345,6 +526,25 @@ const SubscriptionManagement = () => {
                     <main className="flex-1 overflow-y-auto">
                         <div className="px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8 max-w-7xl mx-auto w-full">
                             <div className="grid gap-4 sm:gap-6">
+                                {/* Trial Banner for eligible users */}
+                                {isTrialEligible && (
+                                    <Card className="border-2 border-success/50 bg-success/5">
+                                        <CardContent className="py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 rounded-full bg-success/20">
+                                                    <Gift className="w-5 h-5 text-success" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-semibold text-success">Trial Available!</h3>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Get your first month for just ₹1! After the trial, regular pricing applies.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
                                 {/* Current Subscription Card */}
                                 <Card className="shadow-elegant border-2">
                                     <CardHeader>
@@ -352,68 +552,145 @@ const SubscriptionManagement = () => {
                                             <div>
                                                 <CardTitle className="text-lg sm:text-xl">Current Subscription</CardTitle>
                                                 <CardDescription className="text-xs sm:text-sm">
-                                                    {profile?.subscription_active ? "Active" : "Inactive"}
+                                                    {hasActiveSubscription
+                                                        ? (activeSubscription?.status === 'cancelling' ? "Subscription cancelling at period end" : "Active")
+                                                        : "No Active Subscription"}
                                                 </CardDescription>
                                             </div>
-                                            {profile?.subscription_active && (
-                                                <Badge className="bg-success text-xs sm:text-sm">
-                                                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                                                    Active
-                                                </Badge>
-                                            )}
+                                            {getStatusBadge()}
                                         </div>
                                     </CardHeader>
                                     <CardContent className="space-y-4">
-                                        <div className="flex items-center justify-between flex-wrap gap-4">
-                                            <div className="flex items-center gap-3">
-                                                {React.createElement(categories.find(c => c.id === profile?.user_category)?.icon || User, {
-                                                    className: "w-8 h-8 sm:w-10 sm:h-10 text-primary"
-                                                })}
+                                        {activeSubscription ? (
+                                            <>
+                                                <div className="flex items-center justify-between flex-wrap gap-4">
+                                                    <div className="flex items-center gap-3">
+                                                        {React.createElement(categories.find(c => c.id === currentCategory)?.icon || User, {
+                                                            className: "w-8 h-8 sm:w-10 sm:h-10 text-primary"
+                                                        })}
+                                                        <div>
+                                                            <h3 className="text-xl sm:text-2xl font-bold capitalize">{currentTier}</h3>
+                                                            <p className="text-sm sm:text-base text-muted-foreground capitalize">
+                                                                {currentCategory} Plan
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {activeSubscription?.end_date && (
+                                                        <div className="text-right">
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {activeSubscription?.status === 'cancelling' ? 'Access until' : (activeSubscription?.is_trial ? 'Trial ends' : 'Next billing')}
+                                                            </p>
+                                                            <p className="text-sm sm:text-base font-semibold">
+                                                                {format(new Date(activeSubscription.end_date), "MMM dd, yyyy")}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {(activeSubscription?.status === 'cancelling' || activeSubscription?.is_trial) && (
+                                                    <div className={`p-3 rounded-lg border ${activeSubscription?.status === 'cancelling' ? 'bg-orange-500/10 border-orange-500/20' : 'bg-warning/10 border-warning/20'}`}>
+                                                        <div className="flex items-center gap-2">
+                                                            <AlertCircle className={`w-4 h-4 ${activeSubscription?.status === 'cancelling' ? 'text-orange-500' : 'text-warning'}`} />
+                                                            <p className={`text-sm ${activeSubscription?.status === 'cancelling' ? 'text-orange-600' : 'text-warning'}`}>
+                                                                {activeSubscription?.status === 'cancelling'
+                                                                    ? `Subscription cancelled - Active until ${format(new Date(activeSubscription.end_date), "MMM dd")}`
+                                                                    : `Trial period - Full charges apply after ${format(new Date(activeSubscription.end_date), "MMM dd")}`
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <div className="flex items-center gap-3 py-2">
+                                                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                                                    <User className="w-5 h-5 text-muted-foreground" />
+                                                </div>
                                                 <div>
-                                                    <h3 className="text-xl sm:text-2xl font-bold capitalize">{currentTier}</h3>
-                                                    <p className="text-sm sm:text-base text-muted-foreground">
-                                                        {profile?.subscription_active ? "Active Plan" : "No Active Plan"}
+                                                    <h3 className="text-xl font-bold text-muted-foreground">No Plan</h3>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Choose a plan below to get started
                                                     </p>
                                                 </div>
                                             </div>
-                                            {profile?.subscription_end_date && (
-                                                <div className="text-right">
-                                                    <p className="text-xs text-muted-foreground">Next billing date</p>
-                                                    <p className="text-sm sm:text-base font-semibold">
-                                                        {format(new Date(profile.subscription_end_date), "MMM dd, yyyy")}
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                        {profile?.subscription_active && (
+                                        )}
+
+                                        {hasActiveSubscription && (
                                             <>
                                                 <Separator />
-                                                <AlertDialog>
-                                                    <AlertDialogTrigger asChild>
-                                                        <Button variant="outline" className="w-full sm:w-auto text-destructive hover:bg-destructive/10 text-xs sm:text-sm">
-                                                            <XCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                                                            Cancel Subscription
-                                                        </Button>
-                                                    </AlertDialogTrigger>
-                                                    <AlertDialogContent>
-                                                        <AlertDialogHeader>
-                                                            <AlertDialogTitle>Cancel Subscription?</AlertDialogTitle>
-                                                            <AlertDialogDescription>
-                                                                Your subscription will remain active until the end of the current billing period.
-                                                                After that, you'll be downgraded to the Basic plan.
-                                                            </AlertDialogDescription>
-                                                        </AlertDialogHeader>
-                                                        <AlertDialogFooter>
-                                                            <AlertDialogCancel>Keep Subscription</AlertDialogCancel>
-                                                            <AlertDialogAction
-                                                                onClick={handleCancelSubscription}
-                                                                className="bg-destructive hover:bg-destructive/90"
-                                                            >
-                                                                {processing ? "Cancelling..." : "Yes, Cancel"}
-                                                            </AlertDialogAction>
-                                                        </AlertDialogFooter>
-                                                    </AlertDialogContent>
-                                                </AlertDialog>
+                                                <div className="flex flex-col sm:flex-row gap-3">
+                                                    {activeSubscription?.status === 'cancelling' ? (
+                                                        <AlertDialog>
+                                                            <AlertDialogTrigger asChild>
+                                                                <Button
+                                                                    disabled={processing}
+                                                                    className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-xs sm:text-sm"
+                                                                >
+                                                                    {processing ? (
+                                                                        <>
+                                                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                                            Resuming...
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <CreditCard className="w-4 h-4 mr-2" />
+                                                                            Resume Subscription
+                                                                        </>
+                                                                    )}
+                                                                </Button>
+                                                            </AlertDialogTrigger>
+                                                            <AlertDialogContent>
+                                                                <AlertDialogHeader>
+                                                                    <AlertDialogTitle>Resume Subscription</AlertDialogTitle>
+                                                                    <AlertDialogDescription className="space-y-2">
+                                                                        <p>
+                                                                            To resume your subscription seamlessly, we need to schedule a new billing cycle starting from <strong>{format(new Date(activeSubscription.end_date!), "MMM dd, yyyy")}</strong>.
+                                                                        </p>
+                                                                        <div className="p-3 bg-muted rounded-md text-sm border">
+                                                                            <p className="font-semibold text-foreground mb-1">Important Note:</p>
+                                                                            <p>
+                                                                                You will be redirected to verify your payment method. A refundable verification fee (₹1) may be charged to authorize the future payment, but you will <strong>NOT</strong> be charged the full plan amount today.
+                                                                            </p>
+                                                                        </div>
+                                                                    </AlertDialogDescription>
+                                                                </AlertDialogHeader>
+                                                                <AlertDialogFooter>
+                                                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                                    <AlertDialogAction onClick={handleResumeSubscription}>
+                                                                        Proceed to Resume
+                                                                    </AlertDialogAction>
+                                                                </AlertDialogFooter>
+                                                            </AlertDialogContent>
+                                                        </AlertDialog>
+                                                    ) : (
+                                                        <AlertDialog>
+                                                            <AlertDialogTrigger asChild>
+                                                                <Button variant="outline" className="w-full sm:w-auto text-destructive hover:bg-destructive/10 text-xs sm:text-sm">
+                                                                    <XCircle className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
+                                                                    Cancel Subscription
+                                                                </Button>
+                                                            </AlertDialogTrigger>
+                                                            <AlertDialogContent>
+                                                                <AlertDialogHeader>
+                                                                    <AlertDialogTitle>Cancel Subscription?</AlertDialogTitle>
+                                                                    <AlertDialogDescription>
+                                                                        Your subscription will remain active until the end of the current billing period ({format(new Date(activeSubscription?.end_date || new Date()), "MMM dd, yyyy")}).
+                                                                        You can resume it any time before then.
+                                                                    </AlertDialogDescription>
+                                                                </AlertDialogHeader>
+                                                                <AlertDialogFooter>
+                                                                    <AlertDialogCancel>Keep Subscription</AlertDialogCancel>
+                                                                    <AlertDialogAction
+                                                                        onClick={handleCancelSubscription}
+                                                                        className="bg-destructive hover:bg-destructive/90"
+                                                                    >
+                                                                        {processing ? "Cancelling..." : "Yes, Cancel"}
+                                                                    </AlertDialogAction>
+                                                                </AlertDialogFooter>
+                                                            </AlertDialogContent>
+                                                        </AlertDialog>
+                                                    )}
+                                                </div>
                                             </>
                                         )}
                                     </CardContent>
@@ -424,10 +701,9 @@ const SubscriptionManagement = () => {
                                     <div className="flex items-center justify-between flex-wrap gap-4">
                                         <div>
                                             <h2 className="text-lg sm:text-xl font-bold">Available Plans</h2>
-                                            <p className="text-xs sm:text-sm text-muted-foreground">Upgrade or change your subscription</p>
+                                            <p className="text-xs sm:text-sm text-muted-foreground">Choose a plan that fits your needs</p>
                                         </div>
 
-                                        {/* Category & Billing Period Selectors */}
                                         <div className="flex items-center gap-3">
                                             <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
                                                 <TabsList className="grid grid-cols-3">
@@ -463,64 +739,22 @@ const SubscriptionManagement = () => {
                                     <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
                                         {filteredPlans.map((plan) => {
                                             const IconComponent = categories.find(c => c.id === plan.category)?.icon || User;
-
-                                            // Get user's actual billing period from active subscription
-                                            const userBillingPeriod = profile?.billing_period || 'monthly';
-
-                                            // Only show as current if user has ACTIVE subscription AND tier+category+billing_period ALL match
                                             const isCurrent = hasActiveSubscription &&
-                                                plan.tier === currentTier &&
-                                                plan.category === currentCategory &&
-                                                plan.billing_period === userBillingPeriod;
-
-                                            // Determine if this is upgrade, downgrade, or category change
-                                            const tierOrder = { basic: 0, pro: 1, premium: 2 };
-                                            const categoryOrder = { editor: 0, client: 1, agency: 2 };
-
-                                            const currentTierOrder = tierOrder[currentTier as keyof typeof tierOrder] || 0;
-                                            const planTierOrder = tierOrder[plan.tier as keyof typeof tierOrder] || 0;
-                                            const currentCategoryOrder = categoryOrder[currentCategory as keyof typeof categoryOrder] || 0;
-                                            const planCategoryOrder = categoryOrder[plan.category as keyof typeof categoryOrder] || 0;
-
-                                            // Check if same category or different category
-                                            const isSameCategory = plan.category === currentCategory;
-                                            const isCategoryChange = !isSameCategory && hasActiveSubscription;
-
-                                            // Check billing period change
-                                            const isBillingPeriodChange = hasActiveSubscription && plan.billing_period !== userBillingPeriod;
-                                            const isMonthlyToAnnual = hasActiveSubscription && userBillingPeriod === 'monthly' && plan.billing_period === 'annual';
-
-                                            // For same category: show upgrade/downgrade based on tier
-                                            // BUT: Monthly to Annual is always upgrade (never downgrade)
-                                            let isUpgrade = false;
-                                            let isDowngrade = false;
-
-                                            if (hasActiveSubscription && isSameCategory) {
-                                                if (isMonthlyToAnnual) {
-                                                    // Monthly to Annual: always upgrade regardless of tier
-                                                    isUpgrade = true;
-                                                } else if (plan.billing_period === userBillingPeriod) {
-                                                    // Same billing period: check tier
-                                                    isUpgrade = planTierOrder > currentTierOrder;
-                                                    isDowngrade = planTierOrder < currentTierOrder && !isCurrent;
-                                                } else {
-                                                    // Annual to Monthly: can be downgrade if lower tier
-                                                    isUpgrade = planTierOrder > currentTierOrder;
-                                                    isDowngrade = planTierOrder < currentTierOrder && !isCurrent;
-                                                }
-                                            }
-
-                                            // For agency category: always show upgrade (highest category)
-                                            const isAgencyUpgrade = hasActiveSubscription && plan.category === 'agency' && currentCategory !== 'agency';
-
-                                            // Only show trial for monthly plans
-                                            const showTrial = isTrialEligible && plan.billing_period !== 'annual';
+                                                activeSubscription?.plan_id === plan.id;
+                                            const showTrial = isTrialEligible && plan.billing_period === 'monthly';
 
                                             return (
-                                                <Card key={plan.id} className={cn("shadow-elegant transition-all hover:shadow-2xl flex flex-col", isCurrent && "border-primary border-2", isPlanPopular(plan.tier) && "border-primary/50")}>
+                                                <Card key={plan.id} className={cn(
+                                                    "shadow-elegant transition-all hover:shadow-2xl flex flex-col",
+                                                    isCurrent && "border-primary border-2",
+                                                    isPlanPopular(plan.tier) && "border-primary/50"
+                                                )}>
                                                     <CardHeader>
                                                         <div className="flex items-center justify-between">
-                                                            <div className={cn("p-2 rounded-lg bg-gradient-to-br", isPlanPopular(plan.tier) ? "from-green-500 to-emerald-600" : "from-gray-500 to-gray-600")}>
+                                                            <div className={cn(
+                                                                "p-2 rounded-lg bg-gradient-to-br",
+                                                                isPlanPopular(plan.tier) ? "from-green-500 to-emerald-600" : "from-gray-500 to-gray-600"
+                                                            )}>
                                                                 <IconComponent className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                                                             </div>
                                                             {isCurrent && (
@@ -530,9 +764,7 @@ const SubscriptionManagement = () => {
                                                                 </Badge>
                                                             )}
                                                             {isPlanPopular(plan.tier) && !isCurrent && (
-                                                                <Badge className="bg-success">
-                                                                    Popular
-                                                                </Badge>
+                                                                <Badge className="bg-success">Popular</Badge>
                                                             )}
                                                         </div>
                                                         <CardTitle className="text-xl sm:text-2xl">{plan.name}</CardTitle>
@@ -540,33 +772,73 @@ const SubscriptionManagement = () => {
                                                             {showTrial ? (
                                                                 <>
                                                                     <div className="flex items-baseline gap-2">
-                                                                        <p className="text-2xl sm:text-3xl font-bold text-success">₹2</p>
-                                                                        <p className="text-sm text-muted-foreground line-through">{formatPrice(plan.price)}</p>
+                                                                        <p className="text-2xl sm:text-3xl font-bold text-success">₹1</p>
+                                                                        <p className="text-sm text-muted-foreground line-through">
+                                                                            {formatPrice(plan.price_inr || plan.price)}
+                                                                        </p>
                                                                     </div>
-                                                                    <p className="text-xs sm:text-sm text-success font-semibold">First month trial, then {formatPrice(plan.price)}/{plan.billing_period}</p>
+                                                                    <p className="text-xs sm:text-sm text-success font-semibold">
+                                                                        First month trial, then {formatPrice(plan.price_inr || plan.price)}/month
+                                                                    </p>
+                                                                </>
+                                                            ) : plan.billing_period === 'annual' && plan.annual_discount_percentage && plan.annual_discount_percentage > 0 ? (
+                                                                <>
+                                                                    <div className="flex items-baseline gap-2">
+                                                                        <p className="text-sm text-muted-foreground line-through">
+                                                                            {formatPrice(Math.round((plan.price_inr || plan.price) / (1 - plan.annual_discount_percentage / 100)))}
+                                                                        </p>
+                                                                        <Badge className="bg-success text-xs">Save {plan.annual_discount_percentage}%</Badge>
+                                                                    </div>
+                                                                    <p className="text-2xl sm:text-3xl font-bold text-success">
+                                                                        {formatPrice(plan.price_inr || plan.price)}
+                                                                    </p>
+                                                                    <p className="text-xs sm:text-sm text-muted-foreground">
+                                                                        per year
+                                                                    </p>
                                                                 </>
                                                             ) : (
                                                                 <>
-                                                                    <p className="text-2xl sm:text-3xl font-bold">{formatPrice(plan.price)}</p>
-                                                                    <p className="text-xs sm:text-sm text-muted-foreground">per {plan.billing_period}</p>
+                                                                    <p className="text-2xl sm:text-3xl font-bold">
+                                                                        {formatPrice(plan.price_inr || plan.price)}
+                                                                    </p>
+                                                                    <p className="text-xs sm:text-sm text-muted-foreground">
+                                                                        per {plan.billing_period}
+                                                                    </p>
                                                                 </>
                                                             )}
                                                         </div>
+                                                        {plan.description && (
+                                                            <p className="text-xs text-muted-foreground mt-1">{plan.description}</p>
+                                                        )}
                                                     </CardHeader>
                                                     <CardContent className="flex flex-col flex-1 space-y-4">
                                                         <Separator />
+
+                                                        {/* Limits info */}
+                                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                                            <div className="p-2 rounded bg-muted/50">
+                                                                <p className="text-muted-foreground">Editors</p>
+                                                                <p className="font-semibold">{plan.editor_limit !== null && plan.editor_limit !== undefined ? plan.editor_limit : 'Unlimited'}</p>
+                                                            </div>
+                                                            <div className="p-2 rounded bg-muted/50">
+                                                                <p className="text-muted-foreground">Clients</p>
+                                                                <p className="font-semibold">{plan.client_limit !== null && plan.client_limit !== undefined ? plan.client_limit : 'Unlimited'}</p>
+                                                            </div>
+                                                        </div>
+
                                                         <ul className="space-y-2 flex-1">
-                                                            {plan.features.map((feature, idx) => (
+                                                            {(plan.features || []).map((feature: string, idx: number) => (
                                                                 <li key={idx} className="flex items-start gap-2 text-xs sm:text-sm">
                                                                     <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
                                                                     <span>{feature}</span>
                                                                 </li>
                                                             ))}
                                                         </ul>
+
                                                         <Button
-                                                            onClick={() => isCurrent ? null : handleSubscribe(plan.id)}
+                                                            onClick={() => !isCurrent && handleSubscribe(plan.id, showTrial)}
                                                             disabled={isCurrent || (processing && selectedPlan === plan.id)}
-                                                            className={cn("w-full text-xs sm:text-sm mt-auto", isCurrent ? "" : "gradient-primary")}
+                                                            className={cn("w-full text-xs sm:text-sm mt-auto", !isCurrent && "gradient-primary")}
                                                             variant={isCurrent ? "outline" : "default"}
                                                         >
                                                             {isCurrent ? (
@@ -574,48 +846,25 @@ const SubscriptionManagement = () => {
                                                                     <CheckCircle2 className="w-4 h-4 mr-2" />
                                                                     Current Plan
                                                                 </>
+                                                            ) : processing && selectedPlan === plan.id ? (
+                                                                <>
+                                                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                                    Processing...
+                                                                </>
+                                                            ) : showTrial ? (
+                                                                <>
+                                                                    <Gift className="w-4 h-4 mr-2" />
+                                                                    Start ₹1 Trial
+                                                                </>
+                                                            ) : hasActiveSubscription ? (
+                                                                <>
+                                                                    <ArrowRight className="w-4 h-4 mr-2" />
+                                                                    Switch Plan
+                                                                </>
                                                             ) : (
                                                                 <>
-                                                                    {processing && selectedPlan === plan.id ? (
-                                                                        <>
-                                                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                                            Processing...
-                                                                        </>
-                                                                    ) : (
-                                                                        <>
-                                                                            {showTrial ? (
-                                                                                <>
-                                                                                    <Sparkles className="w-4 h-4 mr-2" />
-                                                                                    Start Your Free Trial
-                                                                                </>
-                                                                            ) : isAgencyUpgrade ? (
-                                                                                <>
-                                                                                    <ArrowRight className="w-4 h-4 mr-2" />
-                                                                                    Upgrade to Agency
-                                                                                </>
-                                                                            ) : isUpgrade ? (
-                                                                                <>
-                                                                                    <ArrowRight className="w-4 h-4 mr-2" />
-                                                                                    Upgrade Plan
-                                                                                </>
-                                                                            ) : isDowngrade ? (
-                                                                                <>
-                                                                                    <ArrowLeft className="w-4 h-4 mr-2" />
-                                                                                    Downgrade Plan
-                                                                                </>
-                                                                            ) : isCategoryChange ? (
-                                                                                <>
-                                                                                    <ArrowRight className="w-4 h-4 mr-2" />
-                                                                                    Change Plan
-                                                                                </>
-                                                                            ) : (
-                                                                                <>
-                                                                                    Subscribe
-                                                                                    <ArrowRight className="w-4 h-4 ml-2" />
-                                                                                </>
-                                                                            )}
-                                                                        </>
-                                                                    )}
+                                                                    Subscribe
+                                                                    <ArrowRight className="w-4 h-4 ml-2" />
                                                                 </>
                                                             )}
                                                         </Button>
@@ -624,135 +873,17 @@ const SubscriptionManagement = () => {
                                             );
                                         })}
                                     </div>
+
+                                    {filteredPlans.length === 0 && (
+                                        <Card className="p-8 text-center">
+                                            <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                                            <h3 className="text-lg font-semibold">No Plans Available</h3>
+                                            <p className="text-muted-foreground">
+                                                No plans are currently available for this category and billing period.
+                                            </p>
+                                        </Card>
+                                    )}
                                 </div>
-
-                                {/* Payment Methods */}
-                                <Card className="shadow-elegant">
-                                    <CardHeader>
-                                        <div className="flex items-center justify-between flex-wrap gap-3">
-                                            <div>
-                                                <CardTitle className="text-lg sm:text-xl">Payment Methods</CardTitle>
-                                                <CardDescription className="text-xs sm:text-sm">Manage your saved payment methods</CardDescription>
-                                            </div>
-                                            <Button onClick={() => toast.info("Add payment method feature coming soon!")} size="sm" className="text-xs sm:text-sm">
-                                                <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                                                Add Method
-                                            </Button>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent>
-                                        {paymentMethods.length === 0 ? (
-                                            <div className="text-center py-8">
-                                                <CreditCard className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                                                <p className="text-sm text-muted-foreground">No payment methods added</p>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="mt-4 text-xs sm:text-sm"
-                                                    onClick={() => toast.info("Add payment method feature coming soon!")}
-                                                >
-                                                    <Plus className="w-4 h-4 mr-2" />
-                                                    Add Your First Method
-                                                </Button>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-3">
-                                                {paymentMethods.map((method) => (
-                                                    <div key={method.id} className="flex items-center justify-between p-3 sm:p-4 border rounded-lg hover:bg-accent/50 transition-colors">
-                                                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center flex-shrink-0">
-                                                                <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                                                            </div>
-                                                            <div className="min-w-0">
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <p className="text-sm sm:text-base font-semibold capitalize">{method.brand}</p>
-                                                                    {method.is_default && (
-                                                                        <Badge className="bg-success text-[10px] sm:text-xs">Default</Badge>
-                                                                    )}
-                                                                </div>
-                                                                <p className="text-xs sm:text-sm text-muted-foreground">•••• {method.last4}</p>
-                                                                <p className="text-[10px] sm:text-xs text-muted-foreground">Expires {method.expiry}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 flex-shrink-0">
-                                                            {!method.is_default && (
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="outline"
-                                                                    onClick={() => handleSetDefaultPayment(method.id)}
-                                                                    className="text-xs"
-                                                                >
-                                                                    Set Default
-                                                                </Button>
-                                                            )}
-                                                            <AlertDialog>
-                                                                <AlertDialogTrigger asChild>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="ghost"
-                                                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                    >
-                                                                        <Trash2 className="w-3 h-3 sm:w-4 sm:h-4" />
-                                                                    </Button>
-                                                                </AlertDialogTrigger>
-                                                                <AlertDialogContent>
-                                                                    <AlertDialogHeader>
-                                                                        <AlertDialogTitle>Remove Payment Method?</AlertDialogTitle>
-                                                                        <AlertDialogDescription>
-                                                                            This payment method will be permanently removed from your account.
-                                                                        </AlertDialogDescription>
-                                                                    </AlertDialogHeader>
-                                                                    <AlertDialogFooter>
-                                                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                                        <AlertDialogAction
-                                                                            onClick={() => handleRemovePayment(method.id)}
-                                                                            className="bg-destructive hover:bg-destructive/90"
-                                                                        >
-                                                                            Remove
-                                                                        </AlertDialogAction>
-                                                                    </AlertDialogFooter>
-                                                                </AlertDialogContent>
-                                                            </AlertDialog>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
-
-                                {/* Subscription Info */}
-                                <Card className="shadow-elegant bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
-                                    <CardHeader>
-                                        <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                                            <Shield className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-                                            Subscription Benefits
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-3">
-                                        <div className="flex items-start gap-2">
-                                            <Clock className="w-4 h-4 text-primary mt-1 flex-shrink-0" />
-                                            <div>
-                                                <p className="text-xs sm:text-sm font-semibold">Flexible Billing</p>
-                                                <p className="text-[10px] sm:text-xs text-muted-foreground">Cancel anytime, no questions asked</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-start gap-2">
-                                            <Shield className="w-4 h-4 text-primary mt-1 flex-shrink-0" />
-                                            <div>
-                                                <p className="text-xs sm:text-sm font-semibold">Secure Payments</p>
-                                                <p className="text-[10px] sm:text-xs text-muted-foreground">All transactions are encrypted and secure</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-start gap-2">
-                                            <AlertCircle className="w-4 h-4 text-primary mt-1 flex-shrink-0" />
-                                            <div>
-                                                <p className="text-xs sm:text-sm font-semibold">No Hidden Fees</p>
-                                                <p className="text-[10px] sm:text-xs text-muted-foreground">What you see is what you pay</p>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
                             </div>
                         </div>
                     </main>

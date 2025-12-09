@@ -53,60 +53,70 @@ export default function Editors() {
     hourly_rate: "",
     monthly_salary: "",
   });
+  const {
+    canAddEditor,
+    refreshLimits,
+    hasActiveSubscription,
+    editorLimit,
+    currentEditorCount,
+    canAccessEditorsPage,
+    loading: limitsLoading,
+    planAllowsEditors
+  } = useSubscriptionLimits();
+
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
-  const { canAddEditor, refreshLimits } = useSubscriptionLimits();
+  const isReadOnly = !planAllowsEditors;
 
-  useEffect(() => {
-    checkAuth();
-    loadEditors();
-  }, []);
+  // ... (keep getLimitDialogContent and useEffect)
 
-  const checkAuth = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      navigate("/auth");
+  // ... (Access Denied check)
+
+  // ... (checkAuth, loadEditors)
+
+
+  const getLimitDialogContent = () => {
+    if (isReadOnly) {
+      return {
+        title: "Upgrade Your Plan",
+        description: "The Editors page is available for Clients and Agencies. Upgrade your account to manage your editors."
+      };
     }
+    return {
+      title: "Editor Limit Reached",
+      description: `You have reached the limit of ${editorLimit} editors for your current plan. Upgrade your plan to add more editors.`
+    };
   };
 
-  const loadEditors = async () => {
+  const { title: limitTitle, description: limitDescription } = getLimitDialogContent();
+
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  // Optimized: Combined auth check and data loading with parallel queries
+  async function loadAllData() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        navigate("/auth");
+        return;
+      }
 
-      // Get current user's email
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("id", user.id)
-        .single();
+      // Run profile and data queries in parallel
+      const [profileResult, myEditorsResult, clientEntriesResult] = await Promise.all([
+        supabase.from("profiles").select("email").eq("id", user.id).single(),
+        supabase.from("editors").select("*").eq("created_by", user.id).order("created_at", { ascending: false }),
+        supabase.from("clients").select("*").order("created_at", { ascending: false })
+      ]);
 
-      const userEmail = currentProfile?.email?.toLowerCase() || "";
+      const userEmail = profileResult.data?.email?.toLowerCase() || "";
 
-      // 1. Get editors I created (my editors)
-      // @ts-ignore - Supabase type inference issue, works at runtime
-      const myEditorsQuery = supabase.from("editors").select("*").eq("created_by", user.id).order("created_at", { ascending: false });
-      const { data: myEditors } = await myEditorsQuery;
-
-      // 2. Get CLIENT entries where MY email was added by someone else
-      // Those people become my editors (they hired me as client, so I see them as editor)
-      // @ts-ignore - Supabase type inference issue, works at runtime
-      const clientQuery = supabase.from("clients").select("*").order("created_at", { ascending: false });
-      const { data: clientEntries, error: clientError } = await clientQuery;
-
-      console.log("DEBUG Editors - My email:", userEmail);
-      console.log("DEBUG Editors - My user.id:", user.id);
-      console.log("DEBUG Editors - All client entries:", clientEntries);
-      if (clientError) console.error("DEBUG Editors - Error:", clientError);
-
-      // Filter entries where NOT created by me AND (email matches OR user_id matches)
-      const myClientEntries = (clientEntries || []).filter(
+      // Filter linked entries
+      const myClientEntries = (clientEntriesResult.data || []).filter(
         (entry: any) => {
           const isNotMyEntry = entry.created_by !== user.id;
           const emailMatch = entry.email?.toLowerCase().trim() === userEmail.toLowerCase().trim();
           const userIdMatch = entry.user_id === user.id;
-          console.log("DEBUG Editors - Check:", entry.email, "isNotMine:", isNotMyEntry, "emailMatch:", emailMatch);
           return isNotMyEntry && (emailMatch || userIdMatch);
         }
       );
@@ -123,7 +133,7 @@ export default function Editors() {
         creatorProfiles = profiles || [];
       }
 
-      // Transform client entries to editor format (show creator's profile - the person who added me)
+      // Transform client entries to editor format
       const linkedEditors = myClientEntries.map((entry: any) => {
         const creator = creatorProfiles.find((p: any) => p.id === entry.created_by);
         return {
@@ -132,27 +142,35 @@ export default function Editors() {
           full_name: creator?.full_name || "Unknown User",
           email: creator?.email || "",
           avatar_url: creator?.avatar_url || null,
-          specialty: "Linked Editor", // They added me as Client, so they are my Editor
+          specialty: "Linked Editor",
           employment_type: entry.employment_type || "freelance",
           hourly_rate: null,
           monthly_salary: entry.monthly_rate || null,
           isLinked: true,
-          linkedType: "client", // Indicates source
+          linkedType: "client",
           originalEntry: entry
         };
       });
 
-      console.log("Fetched Creator Profiles:", creatorProfiles);
-      console.log("My editors:", myEditors?.length || 0);
-      console.log("Linked editors (from client entries):", linkedEditors.length);
-
-      setEditors([...(myEditors || []) as Editor[], ...linkedEditors]);
+      setEditors([...(myEditorsResult.data || []) as Editor[], ...linkedEditors]);
     } catch (error) {
       console.error("Error loading editors:", error);
       toast.error("Failed to load editors");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Keep for manual refresh
+  async function checkAuth() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/auth");
+    }
+  }
+
+  async function loadEditors() {
+    await loadAllData();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -163,6 +181,34 @@ export default function Editors() {
       } = await supabase.auth.getUser();
 
       if (editingEditor) {
+        // Check for duplicate email if email has changed
+        if (formData.email.toLowerCase().trim() !== editingEditor.email.toLowerCase().trim()) {
+          // Check if new email exists in other editors
+          const { data: existingEditors } = await supabase
+            .from("editors")
+            .select("id, email")
+            .eq("created_by", user?.id)
+            .neq("id", editingEditor.id) // Exclude current editor
+            .ilike("email", formData.email.trim());
+
+          if (existingEditors && existingEditors.length > 0) {
+            toast.error("This email is already used by another editor!");
+            return;
+          }
+
+          // Check if new email exists in clients
+          const { data: existingClients } = await supabase
+            .from("clients")
+            .select("id, email")
+            .eq("created_by", user?.id)
+            .ilike("email", formData.email.trim());
+
+          if (existingClients && existingClients.length > 0) {
+            toast.error("This email is already used as a client!");
+            return;
+          }
+        }
+
         // Update existing editor
         const { data: updatedEditor, error } = await supabase
           .from("editors")
@@ -181,13 +227,38 @@ export default function Editors() {
         if (error) throw error;
         setEditors(editors.map(e => e.id === editingEditor.id ? updatedEditor as Editor : e));
         toast.success("Editor updated successfully");
+        refreshLimits(); // Refresh limits after update
       } else {
+        // Check if email already exists in user's editors (created by me)
+        const { data: existingEditors } = await supabase
+          .from("editors")
+          .select("id, email")
+          .eq("created_by", user?.id)
+          .ilike("email", formData.email.trim());
+
+        if (existingEditors && existingEditors.length > 0) {
+          toast.error("This email is already added as an editor!");
+          return;
+        }
+
+        // Check if email already exists in user's clients (created by me)
+        const { data: existingClients } = await supabase
+          .from("clients")
+          .select("id, email")
+          .eq("created_by", user?.id)
+          .ilike("email", formData.email.trim());
+
+        if (existingClients && existingClients.length > 0) {
+          toast.error("This email is already added as a client! Cannot add the same email as an editor.");
+          return;
+        }
+
         // Check if user already exists with this email (case insensitive)
         const { data: existingProfile } = await supabase
           .from("profiles")
           .select("id, full_name")
           .ilike("email", formData.email.trim()) // Case insensitive search
-          .single();
+          .maybeSingle();
 
         // Create new editor
         const { data: newEditor, error } = await supabase
@@ -208,6 +279,7 @@ export default function Editors() {
         if (error) throw error;
         setEditors([newEditor as Editor, ...editors]);
         toast.success("Editor added successfully");
+        refreshLimits(); // Refresh limits after add
 
         // Get current user's profile for notification
         const { data: currentProfile } = await supabase
@@ -280,6 +352,7 @@ export default function Editors() {
 
       setEditors(editors.filter(e => e.id !== editorId));
       toast.success("Editor deleted successfully");
+      refreshLimits(); // Refresh limits after delete
     } catch (error) {
       console.error("Error deleting editor:", error);
       toast.error("Failed to delete editor");
@@ -294,12 +367,52 @@ export default function Editors() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <UserCircle className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Editors</h1>
+                </div>
+              </div>
+            </div>
+          </header>
+          <main className="px-3 sm:px-4 lg:px-6 xl:px-8 py-4 sm:py-6 lg:py-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-muted/50 animate-pulse" />
+                      <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 sm:space-y-3">
+                    <div className="h-4 w-3/4 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-4 w-1/2 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-4 w-2/3 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-9 w-full bg-muted/30 rounded animate-pulse mt-3" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading || limitsLoading) {
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -307,7 +420,6 @@ export default function Editors() {
       <div className="flex w-full min-h-screen">
         <AppSidebar />
         <div className="flex-1 bg-background dark:bg-background">
-          {/* Header */}
           <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
             <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-3 sm:gap-4">
               <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
@@ -317,114 +429,124 @@ export default function Editors() {
                     <UserCircle className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Editors</h1>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Editors</h1>
+                      {isReadOnly && (
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full border whitespace-nowrap flex-shrink-0">
+                          Read Only
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Manage your video editing team</p>
                   </div>
                 </div>
               </div>
 
-              <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
-                <DialogTrigger asChild>
+              <div className="flex items-center gap-2 sm:gap-4 sm:w-auto">
+                {isReadOnly || !canAddEditor ? (
                   <Button
                     className="gradient-primary h-8 sm:h-9 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0"
-                    onClick={(e) => {
-                      if (!canAddEditor) {
-                        e.preventDefault();
-                        setLimitDialogOpen(true);
-                      }
-                    }}
+                    onClick={() => setLimitDialogOpen(true)}
                   >
                     <Plus className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
                     <span className="hidden sm:inline">Add Editor</span>
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle className="text-base sm:text-lg">{editingEditor ? "Edit Editor" : "Add New Editor"}</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="full_name" className="text-xs sm:text-sm">Full Name</Label>
-                      <Input
-                        id="full_name"
-                        value={formData.full_name}
-                        onChange={(e) =>
-                          setFormData({ ...formData, full_name: e.target.value })
-                        }
-                        required
-                        className="h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-xs sm:text-sm">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={(e) =>
-                          setFormData({ ...formData, email: e.target.value })
-                        }
-                        required
-                        className="h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="specialty" className="text-xs sm:text-sm">Specialty</Label>
-                      <Textarea
-                        id="specialty"
-                        value={formData.specialty}
-                        onChange={(e) =>
-                          setFormData({ ...formData, specialty: e.target.value })
-                        }
-                        placeholder="e.g., Motion Graphics, Color Grading"
-                        className="text-xs sm:text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="employment_type" className="text-xs sm:text-sm">Employment Type</Label>
-                      <Select
-                        value={formData.employment_type}
-                        onValueChange={(value: 'fulltime' | 'freelance') =>
-                          setFormData({ ...formData, employment_type: value })
-                        }
-                      >
-                        <SelectTrigger className="h-9 text-xs sm:text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="freelance" className="text-xs sm:text-sm">Freelance</SelectItem>
-                          <SelectItem value="fulltime" className="text-xs sm:text-sm">Full Time</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                ) : (
+                  <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
+                    <DialogTrigger asChild>
+                      <Button className="gradient-primary h-8 sm:h-9 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0">
+                        <Plus className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Add Editor</span>
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle className="text-base sm:text-lg">{editingEditor ? "Edit Editor" : "Add New Editor"}</DialogTitle>
+                      </DialogHeader>
+                      <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="full_name" className="text-xs sm:text-sm">Full Name</Label>
+                          <Input
+                            id="full_name"
+                            value={formData.full_name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, full_name: e.target.value })
+                            }
+                            required
+                            className="h-9 text-xs sm:text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="email" className="text-xs sm:text-sm">Email</Label>
+                          <Input
+                            id="email"
+                            type="email"
+                            value={formData.email}
+                            onChange={(e) =>
+                              setFormData({ ...formData, email: e.target.value })
+                            }
+                            required
+                            className="h-9 text-xs sm:text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="specialty" className="text-xs sm:text-sm">Specialty</Label>
+                          <Textarea
+                            id="specialty"
+                            value={formData.specialty}
+                            onChange={(e) =>
+                              setFormData({ ...formData, specialty: e.target.value })
+                            }
+                            placeholder="e.g., Motion Graphics, Color Grading"
+                            className="text-xs sm:text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="employment_type" className="text-xs sm:text-sm">Employment Type</Label>
+                          <Select
+                            value={formData.employment_type}
+                            onValueChange={(value: 'fulltime' | 'freelance') =>
+                              setFormData({ ...formData, employment_type: value })
+                            }
+                          >
+                            <SelectTrigger className="h-9 text-xs sm:text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="freelance" className="text-xs sm:text-sm">Freelance</SelectItem>
+                              <SelectItem value="fulltime" className="text-xs sm:text-sm">Full Time</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-                    {formData.employment_type === 'fulltime' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="monthly_salary" className="text-xs sm:text-sm">Monthly Salary (₹)</Label>
-                        <Input
-                          id="monthly_salary"
-                          type="number"
-                          step="0.01"
-                          value={formData.monthly_salary}
-                          onChange={(e) =>
-                            setFormData({ ...formData, monthly_salary: e.target.value })
-                          }
-                          className="h-9 text-xs sm:text-sm"
-                        />
-                      </div>
-                    )}
+                        {formData.employment_type === 'fulltime' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="monthly_salary" className="text-xs sm:text-sm">Monthly Salary (₹)</Label>
+                            <Input
+                              id="monthly_salary"
+                              type="number"
+                              step="0.01"
+                              value={formData.monthly_salary}
+                              onChange={(e) =>
+                                setFormData({ ...formData, monthly_salary: e.target.value })
+                              }
+                              className="h-9 text-xs sm:text-sm"
+                            />
+                          </div>
+                        )}
 
-                    <Button type="submit" className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
-                      {editingEditor ? "Update Editor" : "Add Editor"}
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                        <Button type="submit" className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
+                          {editingEditor ? "Update Editor" : "Add Editor"}
+                        </Button>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
             </div>
           </header>
 
           <main className="px-3 sm:px-4 lg:px-6 xl:px-8 py-4 sm:py-6 lg:py-8">
-            {/* Show pending invitations where others added you as CLIENT (so they appear as your editor) */}
             <PendingInvitations type="client" onUpdate={loadEditors} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -483,39 +605,46 @@ export default function Editors() {
                       >
                         View Worksheet
                       </Button>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEdit(editor)}
-                          className="flex-1 h-8 sm:h-9 text-xs sm:text-sm"
-                        >
-                          <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                          Edit
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm" className="flex-1 h-8 sm:h-9 text-xs sm:text-sm text-destructive hover:text-destructive">
-                              <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent className="sm:max-w-[425px]">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="text-base sm:text-lg">Delete Editor?</AlertDialogTitle>
-                              <AlertDialogDescription className="text-xs sm:text-sm">
-                                Are you sure you want to delete {editor.full_name}? This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-                              <AlertDialogCancel className="h-9 text-xs sm:text-sm m-0">Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(editor.id)} className="h-9 text-xs sm:text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 m-0">
+                      {!isReadOnly && !editor.isLinked && (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEdit(editor)}
+                            className="flex-1 h-8 sm:h-9 text-xs sm:text-sm"
+                          >
+                            <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                            Edit
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="flex-1 h-8 sm:h-9 text-xs sm:text-sm text-destructive hover:text-destructive">
+                                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                                 Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="sm:max-w-[425px]">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-base sm:text-lg">Delete Editor?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-xs sm:text-sm">
+                                  Are you sure you want to delete {editor.full_name}? This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                                <AlertDialogCancel className="h-9 text-xs sm:text-sm m-0">Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(editor.id)} className="h-9 text-xs sm:text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 m-0">
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+                      {editor.isLinked && (
+                        <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded text-center">
+                          Linked Editor (Read Only)
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -525,11 +654,15 @@ export default function Editors() {
             {editors.length === 0 && (
               <div className="text-center py-8 sm:py-12">
                 <UserCircle className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 text-muted-foreground" />
-                <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">No editors added yet</p>
-                <Button onClick={() => setIsDialogOpen(true)} className="h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
-                  <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                  Add Your First Editor
-                </Button>
+                <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">
+                  {isReadOnly ? "No editors found and adding is restricted." : "No editors added yet"}
+                </p>
+                {!isReadOnly && (
+                  <Button onClick={() => setIsDialogOpen(true)} className="h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
+                    <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
+                    Add Your First Editor
+                  </Button>
+                )}
               </div>
             )}
           </main>
@@ -539,8 +672,8 @@ export default function Editors() {
       <SubscriptionLimitDialog
         open={limitDialogOpen}
         onOpenChange={setLimitDialogOpen}
-        title="Editors Not Available"
-        description="Free tier does not allow adding editors. Upgrade to a paid plan to add editors to your team."
+        title={limitTitle}
+        description={limitDescription}
       />
     </SidebarProvider>
   );

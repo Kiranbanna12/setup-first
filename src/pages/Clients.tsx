@@ -53,59 +53,63 @@ export default function Clients() {
     monthly_rate: "",
   });
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
-  const { canAddClient, refreshLimits } = useSubscriptionLimits();
+  const {
+    canAddClient,
+    refreshLimits,
+    hasActiveSubscription,
+    clientLimit,
+    currentClientCount,
+    canAccessClientsPage,
+    loading: limitsLoading,
+    planAllowsClients
+  } = useSubscriptionLimits();
 
-  useEffect(() => {
-    checkAuth();
-    loadClients();
-  }, []);
+  const isReadOnly = !planAllowsClients;
 
-  const checkAuth = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      navigate("/auth");
+  // Helper to determine dialog content
+  const getLimitDialogContent = () => {
+    if (isReadOnly) {
+      return {
+        title: "Upgrade Your Plan",
+        description: "The Clients page is available for Editors and Agencies. Upgrade your account to manage your clients."
+      };
     }
+    return {
+      title: "Client Limit Reached",
+      description: `You have reached the limit of ${clientLimit} clients for your current plan. Upgrade your plan to add more clients.`
+    };
   };
 
-  const loadClients = async () => {
+  const { title: limitTitle, description: limitDescription } = getLimitDialogContent();
+
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  // Optimized: Combined auth check and data loading with parallel queries
+  async function loadAllData() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        navigate("/auth");
+        return;
+      }
 
-      // Get current user's email
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("id", user.id)
-        .single();
+      // Run profile and data queries in parallel
+      const [profileResult, myClientsResult, editorEntriesResult] = await Promise.all([
+        supabase.from("profiles").select("email").eq("id", user.id).single(),
+        supabase.from("clients").select("*").eq("created_by", user.id).order("created_at", { ascending: false }),
+        supabase.from("editors").select("*").order("created_at", { ascending: false })
+      ]);
 
-      const userEmail = currentProfile?.email?.toLowerCase() || "";
+      const userEmail = profileResult.data?.email?.toLowerCase() || "";
 
-      // 1. Get clients I created (my clients)
-      // @ts-ignore - Supabase type inference issue, works at runtime
-      const myClientsQuery = supabase.from("clients").select("*").eq("created_by", user.id).order("created_at", { ascending: false });
-      const { data: myClients } = await myClientsQuery;
-
-      // 2. Get EDITOR entries where MY email was added by someone else
-      // Those people become my clients (they hired me as editor, so I see them as client)
-      // @ts-ignore - Supabase type inference issue, works at runtime
-      const editorQuery = supabase.from("editors").select("*").order("created_at", { ascending: false });
-      const { data: editorEntries, error: editorError } = await editorQuery;
-
-      console.log("DEBUG Clients - My email:", userEmail);
-      console.log("DEBUG Clients - My user.id:", user.id);
-      console.log("DEBUG Clients - All editor entries:", editorEntries);
-      if (editorError) console.error("DEBUG Clients - Error:", editorError);
-
-      // Filter entries where NOT created by me AND (email matches OR user_id matches)
-      const myEditorEntries = (editorEntries || []).filter(
+      // Filter linked entries
+      const myEditorEntries = (editorEntriesResult.data || []).filter(
         (entry: any) => {
           const isNotMyEntry = entry.created_by !== user.id;
           const emailMatch = entry.email?.toLowerCase().trim() === userEmail.toLowerCase().trim();
           const userIdMatch = entry.user_id === user.id;
-          console.log("DEBUG Clients - Check:", entry.email, "isNotMine:", isNotMyEntry, "emailMatch:", emailMatch);
           return isNotMyEntry && (emailMatch || userIdMatch);
         }
       );
@@ -122,7 +126,7 @@ export default function Clients() {
         creatorProfiles = profiles || [];
       }
 
-      // Transform editor entries to client format (show creator's profile - the person who added me)
+      // Transform editor entries to client format
       const linkedClients = myEditorEntries.map((entry: any) => {
         const creator = creatorProfiles.find((p: any) => p.id === entry.created_by);
         return {
@@ -131,27 +135,35 @@ export default function Clients() {
           full_name: creator?.full_name || "Unknown User",
           email: creator?.email || "",
           avatar_url: creator?.avatar_url || null,
-          company: "Linked Client", // They added me as Editor, so they are my Client
+          company: "Linked Client",
           employment_type: entry.employment_type || "freelance",
           project_rate: null,
           monthly_rate: entry.monthly_salary || null,
           isLinked: true,
-          linkedType: "editor", // Indicates source
+          linkedType: "editor",
           originalEntry: entry
         };
       });
 
-      console.log("Fetched Creator Profiles:", creatorProfiles);
-      console.log("My clients:", myClients?.length || 0);
-      console.log("Linked clients (from editor entries):", linkedClients.length);
-
-      setClients([...(myClients || []) as Client[], ...linkedClients]);
+      setClients([...(myClientsResult.data || []) as Client[], ...linkedClients]);
     } catch (error) {
       console.error("Error loading clients:", error);
       toast.error("Failed to load clients");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Keep for manual refresh
+  async function checkAuth() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/auth");
+    }
+  }
+
+  async function loadClients() {
+    await loadAllData();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -162,6 +174,34 @@ export default function Clients() {
       } = await supabase.auth.getUser();
 
       if (editingClient) {
+        // Check for duplicate email if email has changed
+        if (formData.email.toLowerCase().trim() !== editingClient.email.toLowerCase().trim()) {
+          // Check if new email exists in other clients
+          const { data: existingClients } = await supabase
+            .from("clients")
+            .select("id, email")
+            .eq("created_by", user?.id)
+            .neq("id", editingClient.id) // Exclude current client
+            .ilike("email", formData.email.trim());
+
+          if (existingClients && existingClients.length > 0) {
+            toast.error("This email is already used by another client!");
+            return;
+          }
+
+          // Check if new email exists in editors
+          const { data: existingEditors } = await supabase
+            .from("editors")
+            .select("id, email")
+            .eq("created_by", user?.id)
+            .ilike("email", formData.email.trim());
+
+          if (existingEditors && existingEditors.length > 0) {
+            toast.error("This email is already used as an editor!");
+            return;
+          }
+        }
+
         // Update existing client
         const { data: updatedClient, error } = await supabase
           .from("clients")
@@ -180,13 +220,38 @@ export default function Clients() {
         if (error) throw error;
         setClients(clients.map(c => c.id === editingClient.id ? updatedClient as Client : c));
         toast.success("Client updated successfully");
+        refreshLimits(); // Refresh limits after update
       } else {
+        // Check if email already exists in user's clients (created by me)
+        const { data: existingClients } = await supabase
+          .from("clients")
+          .select("id, email")
+          .eq("created_by", user?.id)
+          .ilike("email", formData.email.trim());
+
+        if (existingClients && existingClients.length > 0) {
+          toast.error("This email is already added as a client!");
+          return;
+        }
+
+        // Check if email already exists in user's editors (created by me)
+        const { data: existingEditors } = await supabase
+          .from("editors")
+          .select("id, email")
+          .eq("created_by", user?.id)
+          .ilike("email", formData.email.trim());
+
+        if (existingEditors && existingEditors.length > 0) {
+          toast.error("This email is already added as an editor! Cannot add the same email as a client.");
+          return;
+        }
+
         // Check if user already exists with this email (case insensitive)
         const { data: existingProfile } = await supabase
           .from("profiles")
           .select("id, full_name")
           .ilike("email", formData.email.trim()) // Case insensitive search
-          .single();
+          .maybeSingle();
 
         // Create new client
         const { data: newClient, error } = await supabase
@@ -207,6 +272,7 @@ export default function Clients() {
         if (error) throw error;
         setClients([newClient as Client, ...clients]);
         toast.success("Client added successfully");
+        refreshLimits(); // Refresh limits after add
 
         // Get current user's profile for notification
         const { data: currentProfile } = await supabase
@@ -279,6 +345,7 @@ export default function Clients() {
 
       setClients(clients.filter(c => c.id !== clientId));
       toast.success("Client deleted successfully");
+      refreshLimits(); // Refresh limits after delete
     } catch (error) {
       console.error("Error deleting client:", error);
       toast.error("Failed to delete client");
@@ -293,12 +360,52 @@ export default function Clients() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <Users className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Clients</h1>
+                </div>
+              </div>
+            </div>
+          </header>
+          <main className="px-3 sm:px-4 lg:px-6 xl:px-8 py-4 sm:py-6 lg:py-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <Card key={i} className="shadow-elegant">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-muted/50 animate-pulse" />
+                      <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 sm:space-y-3">
+                    <div className="h-4 w-3/4 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-4 w-1/2 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-4 w-2/3 bg-muted/40 rounded animate-pulse" />
+                    <div className="h-9 w-full bg-muted/30 rounded animate-pulse mt-3" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading || limitsLoading) {
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -315,110 +422,121 @@ export default function Clients() {
                     <Users className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Clients</h1>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Clients</h1>
+                      {isReadOnly && (
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full border whitespace-nowrap flex-shrink-0">
+                          Read Only
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Manage your client relationships</p>
                   </div>
                 </div>
               </div>
 
-              <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
-                <DialogTrigger asChild>
+              <div className="flex items-center gap-2 sm:gap-4 sm:w-auto">
+                {isReadOnly || !canAddClient ? (
                   <Button
                     className="gradient-primary h-8 sm:h-9 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0"
-                    onClick={(e) => {
-                      if (!canAddClient) {
-                        e.preventDefault();
-                        setLimitDialogOpen(true);
-                      }
-                    }}
+                    onClick={() => setLimitDialogOpen(true)}
                   >
                     <Plus className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
                     <span className="hidden sm:inline">Add Client</span>
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle className="text-base sm:text-lg">{editingClient ? "Edit Client" : "Add New Client"}</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="full_name" className="text-xs sm:text-sm">Full Name</Label>
-                      <Input
-                        id="full_name"
-                        value={formData.full_name}
-                        onChange={(e) =>
-                          setFormData({ ...formData, full_name: e.target.value })
-                        }
-                        required
-                        className="h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-xs sm:text-sm">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.email}
-                        onChange={(e) =>
-                          setFormData({ ...formData, email: e.target.value })
-                        }
-                        required
-                        className="h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="company" className="text-xs sm:text-sm">Company</Label>
-                      <Input
-                        id="company"
-                        value={formData.company}
-                        onChange={(e) =>
-                          setFormData({ ...formData, company: e.target.value })
-                        }
-                        placeholder="Optional"
-                        className="h-9 text-xs sm:text-sm"
-                      />
-                    </div>
+                ) : (
+                  <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
+                    <DialogTrigger asChild>
+                      <Button className="gradient-primary h-8 sm:h-9 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0">
+                        <Plus className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Add Client</span>
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle className="text-base sm:text-lg">{editingClient ? "Edit Client" : "Add New Client"}</DialogTitle>
+                      </DialogHeader>
+                      <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="full_name" className="text-xs sm:text-sm">Full Name</Label>
+                          <Input
+                            id="full_name"
+                            value={formData.full_name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, full_name: e.target.value })
+                            }
+                            required
+                            className="h-9 text-xs sm:text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="email" className="text-xs sm:text-sm">Email</Label>
+                          <Input
+                            id="email"
+                            type="email"
+                            value={formData.email}
+                            onChange={(e) =>
+                              setFormData({ ...formData, email: e.target.value })
+                            }
+                            required
+                            className="h-9 text-xs sm:text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="company" className="text-xs sm:text-sm">Company</Label>
+                          <Input
+                            id="company"
+                            value={formData.company}
+                            onChange={(e) =>
+                              setFormData({ ...formData, company: e.target.value })
+                            }
+                            placeholder="Optional"
+                            className="h-9 text-xs sm:text-sm"
+                          />
+                        </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="employment_type" className="text-xs sm:text-sm">Employment Type</Label>
-                      <Select
-                        value={formData.employment_type}
-                        onValueChange={(value: 'fulltime' | 'freelance') =>
-                          setFormData({ ...formData, employment_type: value })
-                        }
-                      >
-                        <SelectTrigger className="h-9 text-xs sm:text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="freelance" className="text-xs sm:text-sm">Freelance</SelectItem>
-                          <SelectItem value="fulltime" className="text-xs sm:text-sm">Full Time</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="employment_type" className="text-xs sm:text-sm">Employment Type</Label>
+                          <Select
+                            value={formData.employment_type}
+                            onValueChange={(value: 'fulltime' | 'freelance') =>
+                              setFormData({ ...formData, employment_type: value })
+                            }
+                          >
+                            <SelectTrigger className="h-9 text-xs sm:text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="freelance" className="text-xs sm:text-sm">Freelance</SelectItem>
+                              <SelectItem value="fulltime" className="text-xs sm:text-sm">Full Time</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-                    {formData.employment_type === 'fulltime' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="monthly_rate" className="text-xs sm:text-sm">Monthly Rate (₹)</Label>
-                        <Input
-                          id="monthly_rate"
-                          type="number"
-                          step="0.01"
-                          value={formData.monthly_rate}
-                          onChange={(e) =>
-                            setFormData({ ...formData, monthly_rate: e.target.value })
-                          }
-                          className="h-9 text-xs sm:text-sm"
-                        />
-                      </div>
-                    )}
+                        {formData.employment_type === 'fulltime' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="monthly_rate" className="text-xs sm:text-sm">Monthly Rate (₹)</Label>
+                            <Input
+                              id="monthly_rate"
+                              type="number"
+                              step="0.01"
+                              value={formData.monthly_rate}
+                              onChange={(e) =>
+                                setFormData({ ...formData, monthly_rate: e.target.value })
+                              }
+                              className="h-9 text-xs sm:text-sm"
+                            />
+                          </div>
+                        )}
 
-                    <Button type="submit" className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
-                      {editingClient ? "Update Client" : "Add Client"}
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                        <Button type="submit" className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
+                          {editingClient ? "Update Client" : "Add Client"}
+                        </Button>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
             </div>
           </header>
 
@@ -482,39 +600,46 @@ export default function Clients() {
                       >
                         View Worksheet
                       </Button>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEdit(client)}
-                          className="flex-1 h-8 sm:h-9 text-xs sm:text-sm"
-                        >
-                          <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                          Edit
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="outline" size="sm" className="flex-1 h-8 sm:h-9 text-xs sm:text-sm text-destructive hover:text-destructive">
-                              <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent className="sm:max-w-[425px]">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="text-base sm:text-lg">Delete Client?</AlertDialogTitle>
-                              <AlertDialogDescription className="text-xs sm:text-sm">
-                                Are you sure you want to delete {client.full_name}? This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-                              <AlertDialogCancel className="h-9 text-xs sm:text-sm m-0">Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(client.id)} className="h-9 text-xs sm:text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 m-0">
+                      {!isReadOnly && !client.isLinked && (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEdit(client)}
+                            className="flex-1 h-8 sm:h-9 text-xs sm:text-sm"
+                          >
+                            <Edit className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                            Edit
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="flex-1 h-8 sm:h-9 text-xs sm:text-sm text-destructive hover:text-destructive">
+                                <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                                 Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="sm:max-w-[425px]">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-base sm:text-lg">Delete Client?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-xs sm:text-sm">
+                                  Are you sure you want to delete {client.full_name}? This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                                <AlertDialogCancel className="h-9 text-xs sm:text-sm m-0">Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(client.id)} className="h-9 text-xs sm:text-sm bg-destructive text-destructive-foreground hover:bg-destructive/90 m-0">
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+                      {client.isLinked && (
+                        <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded text-center">
+                          Linked Client (Read Only)
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -524,11 +649,15 @@ export default function Clients() {
             {clients.length === 0 && (
               <div className="text-center py-8 sm:py-12">
                 <Users className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 text-muted-foreground" />
-                <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">No clients added yet</p>
-                <Button onClick={() => setIsDialogOpen(true)} className="h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
-                  <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
-                  Add Your First Client
-                </Button>
+                <p className="text-sm sm:text-base text-muted-foreground mb-3 sm:mb-4">
+                  {isReadOnly ? "No clients found and adding is restricted." : "No clients added yet"}
+                </p>
+                {!isReadOnly && (
+                  <Button onClick={() => setIsDialogOpen(true)} className="h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
+                    <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
+                    Add Your First Client
+                  </Button>
+                )}
               </div>
             )}
           </main>
@@ -538,8 +667,8 @@ export default function Clients() {
       <SubscriptionLimitDialog
         open={limitDialogOpen}
         onOpenChange={setLimitDialogOpen}
-        title="Clients Not Available"
-        description="Free tier does not allow adding clients. Upgrade to a paid plan to add clients."
+        title={limitTitle}
+        description={limitDescription}
       />
     </SidebarProvider>
   );

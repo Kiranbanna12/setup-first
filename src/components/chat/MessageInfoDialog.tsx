@@ -9,6 +9,7 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogDescription,
 } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Check, CheckCheck } from 'lucide-react';
@@ -98,6 +99,7 @@ export const MessageInfoDialog = ({ messageId, open, onOpenChange }: MessageInfo
             <DialogContent className="max-w-sm">
                 <DialogHeader>
                     <DialogTitle>Message Info</DialogTitle>
+                    <DialogDescription>Read receipts and delivery status</DialogDescription>
                 </DialogHeader>
 
                 {loading ? (

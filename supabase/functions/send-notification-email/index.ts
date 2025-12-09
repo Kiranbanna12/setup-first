@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,6 +12,49 @@ interface EmailRequest {
   templateName: string;
   variables: Record<string, string>;
   priority?: 'high' | 'normal';
+}
+
+// Helper function to send email via SMTP
+async function sendEmailViaSMTP(to: string, subject: string, htmlBody: string, textBody?: string): Promise<boolean> {
+  const SMTP_HOST = Deno.env.get('SMTP_HOST');
+  const SMTP_PORT = parseInt(Deno.env.get('SMTP_PORT') || '465');
+  const SMTP_USER = Deno.env.get('SMTP_USER');
+  const SMTP_PASS = Deno.env.get('SMTP_PASS');
+  const SMTP_FROM_NOREPLY = Deno.env.get('SMTP_FROM_NOREPLY') || 'noreply@xrozen.com';
+
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    console.log('SMTP not configured. Required: SMTP_HOST, SMTP_USER, SMTP_PASS');
+    return false;
+  }
+
+  try {
+    const client = new SMTPClient({
+      connection: {
+        hostname: SMTP_HOST,
+        port: SMTP_PORT,
+        tls: true,
+        auth: {
+          username: SMTP_USER,
+          password: SMTP_PASS,
+        },
+      },
+    });
+
+    await client.send({
+      from: SMTP_FROM_NOREPLY,
+      to: to,
+      subject: subject,
+      content: textBody || "auto",
+      html: htmlBody,
+    });
+
+    await client.close();
+    console.log(`Email sent successfully via SMTP to ${to}`);
+    return true;
+  } catch (error: any) {
+    console.error('SMTP email error:', error.message || error);
+    return false;
+  }
 }
 
 serve(async (req) => {
@@ -42,11 +86,10 @@ serve(async (req) => {
       .single();
 
     const emailNotifications = preferences?.email_notifications || {};
-    const eventType = templateName.replace('_', '-'); // Normalize to kebab-case (e.g. project_created -> project-created)
-    const granularKey = templateName.includes('-') ? templateName.replace('-', '_') : templateName; // Try snake_case for granular key lookup (e.g. project-created -> project_created)
+    const eventType = templateName.replace('_', '-');
+    const granularKey = templateName.includes('-') ? templateName.replace('-', '_') : templateName;
 
     // Check if user has granularly disabled this event
-    // We check both kebab and snake case keys just to be safe with how frontend saves it
     if (emailNotifications[templateName] === false || emailNotifications[granularKey] === false || emailNotifications[eventType] === false) {
       console.log(`Email skipped: User ${recipientId} has disabled ${templateName} emails`);
       return new Response(JSON.stringify({ skipped: true, reason: 'granular_preference' }), {
@@ -86,18 +129,14 @@ serve(async (req) => {
       throw new Error('Email template not found');
     }
 
-    // Get active email configuration
-    const { data: config, error: configError } = await supabaseClient
+    // Get active email configuration (for from_name if needed)
+    const { data: config } = await supabaseClient
       .from('email_configurations')
       .select('*')
       .eq('is_active', true)
       .order('priority', { ascending: false })
       .limit(1)
       .single();
-
-    if (configError || !config) {
-      throw new Error('No active email configuration found');
-    }
 
     // Replace variables in template
     let subject = template.subject;
@@ -115,7 +154,7 @@ serve(async (req) => {
     const { data: logEntry } = await supabaseClient
       .from('email_logs')
       .insert({
-        configuration_id: config.id,
+        configuration_id: config?.id,
         recipient_email: user.email!,
         recipient_user_id: recipientId,
         subject,
@@ -126,54 +165,38 @@ serve(async (req) => {
       .single();
 
     // Send email using SMTP
-    try {
-      // Here you would integrate with your email service (Resend, SendGrid, etc.)
-      // For now, we'll use a simple SMTP implementation
-      const emailResponse = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: `${config.from_name} <${config.from_email}>`,
-          to: [user.email],
-          subject,
-          html: bodyHtml,
-          text: bodyText,
-        }),
-      });
+    const emailSent = await sendEmailViaSMTP(user.email!, subject, bodyHtml, bodyText);
 
-      if (!emailResponse.ok) {
-        throw new Error(`Email sending failed: ${await emailResponse.text()}`);
-      }
-
+    if (emailSent) {
       // Update log status
-      await supabaseClient
-        .from('email_logs')
-        .update({
-          status: 'sent',
-          sent_at: new Date().toISOString(),
-        })
-        .eq('id', logEntry.id);
+      if (logEntry) {
+        await supabaseClient
+          .from('email_logs')
+          .update({
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+          })
+          .eq('id', logEntry.id);
+      }
 
       console.log(`Email sent successfully to ${user.email}`);
 
-      return new Response(JSON.stringify({ success: true, logId: logEntry.id }), {
+      return new Response(JSON.stringify({ success: true, logId: logEntry?.id }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
-
-    } catch (emailError: any) {
+    } else {
       // Update log with error
-      await supabaseClient
-        .from('email_logs')
-        .update({
-          status: 'failed',
-          error_message: emailError.message,
-        })
-        .eq('id', logEntry.id);
+      if (logEntry) {
+        await supabaseClient
+          .from('email_logs')
+          .update({
+            status: 'failed',
+            error_message: 'SMTP send failed',
+          })
+          .eq('id', logEntry.id);
+      }
 
-      throw emailError;
+      throw new Error('Email sending failed via SMTP');
     }
 
   } catch (error: any) {

@@ -1,8 +1,7 @@
-
 import { useState, useEffect, useRef } from 'react';
-import { Send, Loader2, Plus, Trash2, MessageSquare, History, ExternalLink } from 'lucide-react';
+import { Send, Loader2, Plus, Trash2, MessageSquare, History, ExternalLink, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { SubscriptionLimitDialog } from "@/components/subscription/SubscriptionLimitDialog";
+import { useSubscriptionLimits } from "@/hooks/useSubscriptionLimits";
 
 interface ActionData {
   type: 'project' | 'client' | 'editor';
@@ -55,6 +55,7 @@ export default function XrozenAI() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { hasActiveSubscription, loading: limitsLoading } = useSubscriptionLimits();
 
   // Check authentication
   useEffect(() => {
@@ -76,6 +77,73 @@ export default function XrozenAI() {
     }
   }, [messages, loading]);
 
+  // Restrict access for free plan users
+  if (!limitsLoading && !hasActiveSubscription) {
+    return (
+      <SidebarProvider>
+        <div className="flex w-full min-h-screen">
+          <AppSidebar />
+          <div className="flex-1 bg-background dark:bg-background">
+            <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+              <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">XrozenAI</h1>
+                    <p className="text-xs sm:text-sm text-muted-foreground truncate">Your intelligent workflow assistant</p>
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            <main className="px-4 sm:px-6 lg:px-8 py-12 flex items-center justify-center min-h-[60vh]">
+              <Card className="w-full max-w-md shadow-elegant text-center">
+                <CardHeader>
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Lock className="w-8 h-8 text-primary" />
+                  </div>
+                  <CardTitle className="text-2xl">Upgrade to Premium</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-muted-foreground">
+                    XrozenAI assistant features are available for Premium users. Upgrade your subscription to unlock:
+                  </p>
+                  <ul className="text-left space-y-2 text-sm text-muted-foreground bg-muted/30 p-4 rounded-lg">
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Intelligent workflow automation
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Smart project and client management
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Instant data insights and queries
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                      Advanced productivity tools
+                    </li>
+                  </ul>
+                  <Button
+                    className="w-full mt-4"
+                    onClick={() => navigate('/subscription-management')}
+                  >
+                    Upgrade Subscription
+                  </Button>
+                </CardContent>
+              </Card>
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
+
   // Load conversations
   const loadConversations = async () => {
     try {
@@ -92,11 +160,7 @@ export default function XrozenAI() {
 
       setConversations(data || []);
 
-      // Auto-select most recent conversation only on first load
-      if (data && data.length > 0 && !selectedConversation) {
-        setSelectedConversation(data[0].id);
-        loadMessages(data[0].id);
-      }
+      // DO NOT auto-select most recent conversation - per user request to always start new
     } catch (error) {
       console.error('Error loading conversations:', error);
     } finally {
@@ -374,6 +438,39 @@ export default function XrozenAI() {
       </div>
     );
   };
+
+  // Skeleton loading component for faster perceived loading
+  if (loadingConversations) {
+    return (
+      <SidebarProvider>
+        <div className="flex min-h-screen w-full bg-background overflow-hidden">
+          <AppSidebar />
+          <main className="flex-1 flex flex-col h-screen overflow-hidden w-full max-w-full relative">
+            <header className="flex-shrink-0 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50 w-full">
+              <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4 w-full max-w-full">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">XrozenAI</h1>
+                </div>
+              </div>
+            </header>
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 animate-pulse">
+                  <MessageSquare className="h-8 w-8 text-primary" />
+                </div>
+                <div className="h-6 w-48 bg-muted/50 rounded animate-pulse mx-auto mb-3" />
+                <div className="h-4 w-64 bg-muted/40 rounded animate-pulse mx-auto" />
+              </div>
+            </div>
+          </main>
+        </div>
+      </SidebarProvider>
+    );
+  }
 
   return (
     <SidebarProvider>

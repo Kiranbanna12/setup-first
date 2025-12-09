@@ -8,6 +8,7 @@ import { ChatList } from "@/components/chat/ChatList";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ChatAccessGate } from "@/components/chat/ChatAccessGate";
 import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
 
 const Chat = () => {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ const Chat = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadUserData();
+    loadAllData();
   }, []);
 
   useEffect(() => {
@@ -30,7 +31,8 @@ const Chat = () => {
     }
   }, [selectedProjectId]);
 
-  const loadUserData = async () => {
+  // Optimized: Combined auth and profile loading
+  const loadAllData = async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const session = sessionData?.session;
@@ -91,12 +93,49 @@ const Chat = () => {
     setSearchParams({ project: projectId });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen md:h-screen md:overflow-hidden">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col bg-background dark:bg-background">
+          <header className="flex sticky top-0 border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm z-50 flex-shrink-0">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4 w-full">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Messages</h1>
+              </div>
+            </div>
+          </header>
+          <div className="flex-1 flex overflow-hidden">
+            {/* Chat list skeleton */}
+            <div className="w-full md:w-80 border-r p-3 space-y-3">
+              <div className="h-10 bg-muted/50 rounded-lg animate-pulse" />
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="flex items-center gap-3 p-3 rounded-lg border">
+                  <div className="w-10 h-10 rounded-full bg-muted/50 animate-pulse" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-3/4 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-3 w-1/2 bg-muted/40 rounded animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Empty chat area */}
+            <div className="hidden md:flex flex-1 items-center justify-center">
+              <MessageSquare className="w-12 h-12 text-muted-foreground/30 animate-pulse" />
+            </div>
+          </div>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   return (

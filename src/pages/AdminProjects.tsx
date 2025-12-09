@@ -133,9 +133,40 @@ export default function AdminProjects() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="Project Management" description="Monitor and manage all projects">
+        <div className="max-w-7xl space-y-6">
+          <Card className="shadow-elegant">
+            <CardContent className="pt-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-10 bg-muted/40 rounded animate-pulse" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Card key={i} className="shadow-elegant">
+                <CardHeader className="pb-2">
+                  <div className="h-4 w-20 bg-muted/50 rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-12 bg-muted/50 rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card className="shadow-elegant">
+            <CardContent className="p-0">
+              <div className="space-y-2 p-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-12 w-full bg-muted/30 rounded animate-pulse" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AdminLayout>
     );
   }
 

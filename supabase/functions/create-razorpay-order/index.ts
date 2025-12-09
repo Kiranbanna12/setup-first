@@ -17,7 +17,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { amount, planId } = await req.json();
+    const { amount, planId, isResume, subscriptionId, isTrial } = await req.json();
 
     // Get Razorpay config
     const { data: config } = await supabase
@@ -35,7 +35,10 @@ serve(async (req) => {
 
     // Create Razorpay order
     const auth = btoa(`${razorpayKeyId}:${razorpayKeySecret}`);
-    
+
+    // For resume/trial, use ₹1 verification fee, otherwise use provided amount
+    const orderAmount = (isResume || isTrial) ? 1 : amount;
+
     const orderResponse = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
       headers: {
@@ -43,11 +46,14 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: amount * 100, // Convert to paise
+        amount: orderAmount * 100, // Convert to paise
         currency: 'INR',
         receipt: `order_${Date.now()}`,
         notes: {
-          plan_id: planId
+          plan_id: planId,
+          is_resume: isResume ? 'true' : 'false',
+          is_trial: isTrial ? 'true' : 'false',
+          subscription_id: subscriptionId || ''
         }
       })
     });
@@ -60,19 +66,24 @@ serve(async (req) => {
     const order = await orderResponse.json();
 
     return new Response(
-      JSON.stringify(order),
-      { 
+      JSON.stringify({
+        ...order,
+        order_id: order.id,
+        is_resume: isResume,
+        subscription_id: subscriptionId
+      }),
+      {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
+        status: 200
       }
     );
   } catch (error) {
     console.error('Error creating Razorpay order:', error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
-      { 
+      {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500 
+        status: 500
       }
     );
   }

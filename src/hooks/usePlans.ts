@@ -7,13 +7,19 @@ export interface SubscriptionPlan {
     category: string;
     tier: string;
     price: number;
+    price_inr?: number;
     billing_period: string;
     features: string[];
+    description?: string;
     project_limit: number | null;
     storage_limit: number | null;
+    editor_limit?: number | null;
+    client_limit?: number | null;
     is_active: boolean;
     trial_days: number;
     created_at: string;
+    annual_discount_percentage?: number;
+    base_monthly_plan_id?: string;
 }
 
 export function usePlans() {
@@ -42,16 +48,22 @@ export function usePlans() {
                     const transformedPlans: SubscriptionPlan[] = data.map((plan: any) => ({
                         id: plan.id,
                         name: plan.name,
-                        category: plan.category || 'editor',
+                        category: plan.user_category || 'editor',
                         tier: plan.tier || 'basic',
                         price: plan.price,
+                        price_inr: plan.price_inr,
                         billing_period: plan.billing_period || 'monthly',
                         features: Array.isArray(plan.features) ? plan.features : [],
-                        project_limit: plan.project_limit || null,
-                        storage_limit: plan.storage_limit || null,
+                        description: plan.description,
+                        project_limit: plan.project_limit ?? null,
+                        storage_limit: plan.storage_limit ?? null,
+                        editor_limit: plan.editor_limit ?? null,
+                        client_limit: plan.client_limit ?? null,
                         is_active: plan.is_active,
                         trial_days: plan.trial_days || 30,
-                        created_at: plan.created_at
+                        created_at: plan.created_at,
+                        annual_discount_percentage: plan.annual_discount_percentage || 0,
+                        base_monthly_plan_id: plan.base_monthly_plan_id || null
                     }));
                     setPlans(transformedPlans);
                     return;

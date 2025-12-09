@@ -95,7 +95,7 @@ export const JoinRequestNotification = ({
     };
 
     return (
-        <div className="bg-white dark:bg-slate-800 border-2 border-blue-500 dark:border-blue-400 rounded-xl p-4 mb-3 shadow-xl z-10 relative">
+        <div className="bg-white dark:bg-slate-800 border-2 border-success dark:border-success rounded-xl p-4 mb-3 shadow-xl z-10 relative">
             <div className="flex items-center gap-3">
                 <div className="relative">
                     <Avatar className="h-11 w-11 flex-shrink-0 ring-2 ring-primary/30">
@@ -135,7 +135,7 @@ export const JoinRequestNotification = ({
                     </Button>
                     <Button
                         size="sm"
-                        className="h-9 w-9 p-0 bg-green-600 hover:bg-green-700 rounded-full"
+                        className="h-9 w-9 p-0 bg-success hover:bg-success/80 rounded-full"
                         onClick={handleApprove}
                         disabled={processing !== null}
                         title="Approve request"

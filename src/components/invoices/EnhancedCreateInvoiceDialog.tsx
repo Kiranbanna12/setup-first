@@ -18,11 +18,21 @@ interface Project {
   fee: number;
   status: string;
   client_id?: string;
+  editor_id?: string;
 }
 
 interface Client {
   id: string;
   full_name: string;
+  employment_type?: string;
+  monthly_rate?: number;
+}
+
+interface Editor {
+  id: string;
+  full_name: string;
+  employment_type?: string;
+  monthly_rate?: number;
 }
 
 interface Advance {
@@ -38,24 +48,61 @@ interface EnhancedCreateInvoiceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  userCategory?: string; // 'editor' | 'client'
+  isAgency?: boolean;
 }
 
 export default function EnhancedCreateInvoiceDialog({
   open,
   onOpenChange,
-  onSuccess
+  onSuccess,
+  userCategory = 'editor',
+  isAgency = false
 }: EnhancedCreateInvoiceDialogProps) {
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [editors, setEditors] = useState<Editor[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
   const [selectedAdvances, setSelectedAdvances] = useState<Set<string>>(new Set());
   const [formData, setFormData] = useState({
-    clientId: "",
+    recipientId: "",
+    recipientType: "" as "client" | "editor" | "",
     notes: "",
     dueDate: "",
   });
+  const [includeMonthlyFee, setIncludeMonthlyFee] = useState(false);
+  const [selectedRecipientData, setSelectedRecipientData] = useState<Client | Editor | null>(null);
+
+  // Role-based logic
+  const isEditor = userCategory === 'editor';
+  const isClient = userCategory === 'client';
+  const showClients = isAgency || isEditor;
+  const showEditors = isAgency || isClient;
+
+  // Get appropriate label
+  const getRecipientLabel = () => {
+    if (isAgency) return "Client/Editor";
+    if (isEditor) return "Client";
+    if (isClient) return "Editor";
+    return "Recipient";
+  };
+
+  // Combine recipients based on role
+  const getRecipientOptions = () => {
+    const options: { id: string; name: string; type: 'client' | 'editor'; data: Client | Editor }[] = [];
+
+    if (showClients && clients.length > 0) {
+      clients.forEach(c => options.push({ id: c.id, name: c.full_name, type: 'client', data: c }));
+    }
+
+    if (showEditors && editors.length > 0) {
+      editors.forEach(e => options.push({ id: e.id, name: e.full_name, type: 'editor', data: e }));
+    }
+
+    return options;
+  };
 
   useEffect(() => {
     if (open) {
@@ -63,15 +110,32 @@ export default function EnhancedCreateInvoiceDialog({
     }
   }, [open]);
 
-  // Load pending advances when client is selected
+  // Load pending advances and reset project selection when recipient changes
   useEffect(() => {
-    if (formData.clientId) {
-      loadAdvancesForClient(formData.clientId);
+    if (formData.recipientId && formData.recipientType) {
+      // Find the recipient in the appropriate list
+      const recipientList = formData.recipientType === 'client' ? clients : editors;
+      const recipient = recipientList.find(r => r.id === formData.recipientId) || null;
+      setSelectedRecipientData(recipient);
+
+      // Auto-select monthly fee if fulltime
+      if (recipient?.employment_type === 'fulltime') {
+        setIncludeMonthlyFee(true);
+      } else {
+        setIncludeMonthlyFee(false);
+      }
+
+      loadAdvancesForRecipient(formData.recipientId, formData.recipientType);
+      // Reset project selection when recipient changes
+      setSelectedProjects(new Set());
     } else {
+      setSelectedRecipientData(null);
+      setIncludeMonthlyFee(false);
       setAdvances([]);
       setSelectedAdvances(new Set());
+      setSelectedProjects(new Set());
     }
-  }, [formData.clientId]);
+  }, [formData.recipientId, formData.recipientType, clients, editors]);
 
   const loadData = async () => {
     try {
@@ -81,7 +145,7 @@ export default function EnhancedCreateInvoiceDialog({
       // Load projects without invoice
       const { data: projectsData, error: projectsError } = await supabase
         .from("projects")
-        .select("id, name, fee, status, client_id")
+        .select("id, name, fee, status, client_id, editor_id")
         .eq("created_by", user.id)
         .is("invoice_id", null)
         .not("fee", "is", null);
@@ -92,11 +156,20 @@ export default function EnhancedCreateInvoiceDialog({
       // Load clients
       const { data: clientsData, error: clientsError } = await supabase
         .from("clients")
-        .select("id, full_name")
+        .select("id, full_name, employment_type, monthly_rate")
         .eq("created_by", user.id);
 
       if (clientsError) throw clientsError;
       setClients(clientsData || []);
+
+      // Load editors
+      const { data: editorsData, error: editorsError } = await supabase
+        .from("editors")
+        .select("id, full_name")
+        .eq("created_by", user.id);
+
+      if (editorsError) throw editorsError;
+      setEditors(editorsData || []);
 
     } catch (error) {
       console.error("Error loading data:", error);
@@ -104,18 +177,18 @@ export default function EnhancedCreateInvoiceDialog({
     }
   };
 
-  const loadAdvancesForClient = async (clientId: string) => {
+  const loadAdvancesForRecipient = async (recipientId: string, recipientType: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Load pending advances for this client
+      // Load pending advances for this recipient
       const { data: advancesData } = await supabase
         .from("advances")
         .select("*")
         .eq("user_id", user.id)
-        .eq("recipient_id", clientId)
-        .eq("recipient_type", "client")
+        .eq("recipient_id", recipientId)
+        .eq("recipient_type", recipientType)
         .eq("is_deducted", false);
 
       setAdvances(advancesData || []);
@@ -132,14 +205,6 @@ export default function EnhancedCreateInvoiceDialog({
       newSelected.add(projectId);
     }
     setSelectedProjects(newSelected);
-
-    // Auto-select client from first selected project if not already set
-    if (!formData.clientId && newSelected.size > 0) {
-      const firstProject = projects.find(p => newSelected.has(p.id));
-      if (firstProject?.client_id) {
-        setFormData(prev => ({ ...prev, clientId: firstProject.client_id! }));
-      }
-    }
   };
 
   const toggleAdvance = (advanceId: string) => {
@@ -165,19 +230,20 @@ export default function EnhancedCreateInvoiceDialog({
   };
 
   const calculateFinalTotal = () => {
-    return Math.max(0, calculateProjectTotal() - calculateDeduction());
+    const monthlyFee = includeMonthlyFee && selectedRecipientData?.monthly_rate ? Number(selectedRecipientData.monthly_rate) : 0;
+    return Math.max(0, calculateProjectTotal() + monthlyFee - calculateDeduction());
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (selectedProjects.size === 0) {
-      toast.error("Please select at least one project");
+    if (selectedProjects.size === 0 && !includeMonthlyFee) {
+      toast.error("Please select at least one project or include a monthly fee");
       return;
     }
 
-    if (!formData.clientId) {
-      toast.error("Please select a client for the invoice");
+    if (!formData.recipientId || !formData.recipientType) {
+      toast.error(`Please select a ${getRecipientLabel().toLowerCase()} for the invoice`);
       return;
     }
 
@@ -194,21 +260,30 @@ export default function EnhancedCreateInvoiceDialog({
       const finalTotal = calculateFinalTotal();
       const invoiceNumber = `INV-${Date.now()}`;
 
-      // Create invoice
+      // Create invoice - set client_id or editor_id based on recipient type
+      const invoiceData: any = {
+        user_id: user.id,
+        amount: projectTotal,
+        monthly_fee: includeMonthlyFee && selectedRecipientData?.monthly_rate ? Number(selectedRecipientData.monthly_rate) : 0,
+        total_amount: finalTotal,
+        invoice_number: invoiceNumber,
+        notes: formData.notes
+          ? `${formData.notes}${deduction > 0 ? `\n\nAdvance Deduction: ₹${deduction.toLocaleString('en-IN')}` : ''}`
+          : deduction > 0 ? `Advance Deduction: ₹${deduction.toLocaleString('en-IN')}` : null,
+        due_date: formData.dueDate || null,
+        status: 'draft',
+      };
+
+      // Set client_id or editor_id based on recipient type
+      if (formData.recipientType === 'client') {
+        invoiceData.client_id = formData.recipientId;
+      } else if (formData.recipientType === 'editor') {
+        invoiceData.editor_id = formData.recipientId;
+      }
+
       const { data: invoice, error: invoiceError } = await supabase
         .from("invoices")
-        .insert({
-          user_id: user.id,
-          client_id: formData.clientId,
-          amount: projectTotal,
-          total_amount: finalTotal,
-          invoice_number: invoiceNumber,
-          notes: formData.notes
-            ? `${formData.notes}${deduction > 0 ? `\n\nAdvance Deduction: ₹${deduction.toLocaleString('en-IN')}` : ''}`
-            : deduction > 0 ? `Advance Deduction: ₹${deduction.toLocaleString('en-IN')}` : null,
-          due_date: formData.dueDate || null,
-          status: 'draft',
-        })
+        .insert(invoiceData)
         .select()
         .single();
 
@@ -238,7 +313,7 @@ export default function EnhancedCreateInvoiceDialog({
       }
 
       toast.success("Invoice created successfully");
-      setFormData({ clientId: "", notes: "", dueDate: "" });
+      setFormData({ recipientId: "", recipientType: "", notes: "", dueDate: "" });
       setSelectedProjects(new Set());
       setSelectedAdvances(new Set());
       setAdvances([]);
@@ -257,23 +332,26 @@ export default function EnhancedCreateInvoiceDialog({
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Invoice</DialogTitle>
-          <DialogDescription>Select projects and a client to create an invoice</DialogDescription>
+          <DialogDescription>Select projects and a {getRecipientLabel().toLowerCase()} to create an invoice</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Client Selection */}
+          {/* Recipient Selection (Client/Editor based on role) */}
           <div className="space-y-2">
-            <Label htmlFor="client">Client *</Label>
+            <Label htmlFor="recipient">{getRecipientLabel()} *</Label>
             <Select
-              value={formData.clientId}
-              onValueChange={(value) => setFormData({ ...formData, clientId: value })}
+              value={formData.recipientId ? `${formData.recipientType}:${formData.recipientId}` : ""}
+              onValueChange={(value) => {
+                const [type, id] = value.split(':');
+                setFormData({ ...formData, recipientId: id, recipientType: type as 'client' | 'editor' });
+              }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a client" />
+                <SelectValue placeholder={`Select a ${getRecipientLabel().toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
-                {clients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    {client.full_name}
+                {getRecipientOptions().map((recipient) => (
+                  <SelectItem key={`${recipient.type}:${recipient.id}`} value={`${recipient.type}:${recipient.id}`}>
+                    {recipient.name} {isAgency && <span className="text-muted-foreground">({recipient.type === 'client' ? 'Client' : 'Editor'})</span>}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -291,31 +369,63 @@ export default function EnhancedCreateInvoiceDialog({
             />
           </div>
 
-          {/* Project Selection */}
+          {selectedRecipientData && (
+            <div className="flex items-center space-x-2 border rounded-lg p-3">
+              <Checkbox
+                id="monthlyFee"
+                checked={includeMonthlyFee}
+                onCheckedChange={(checked) => setIncludeMonthlyFee(!!checked)}
+              />
+              <div className="grid gap-1.5 leading-none">
+                <label
+                  htmlFor="monthlyFee"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  Include {selectedRecipientData.employment_type === 'fulltime' ? 'Monthly Salary' : 'Monthly Retainer'}
+                </label>
+                <p className="text-sm text-muted-foreground">
+                  Add fee of ₹{Number(selectedRecipientData.monthly_rate || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
-            <Label>Select Projects</Label>
+            <Label>Select Projects {formData.recipientId && <span className="text-muted-foreground text-xs">(for selected {getRecipientLabel().toLowerCase()})</span>}</Label>
             <ScrollArea className="h-[150px] rounded-md border p-4">
-              {projects.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No projects available for invoicing</p>
-              ) : (
-                <div className="space-y-2">
-                  {projects.map((project) => (
-                    <div key={project.id} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={project.id}
-                        checked={selectedProjects.has(project.id)}
-                        onCheckedChange={() => toggleProject(project.id)}
-                      />
-                      <label
-                        htmlFor={project.id}
-                        className="flex-1 text-sm font-medium leading-none cursor-pointer"
-                      >
-                        {project.name} - ₹{Number(project.fee).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {!formData.recipientId ? (
+                <p className="text-sm text-muted-foreground">Please select a {getRecipientLabel().toLowerCase()} first to see their projects</p>
+              ) : (() => {
+                // Filter projects based on recipient type
+                const filteredProjects = projects.filter(p =>
+                  formData.recipientType === 'client'
+                    ? p.client_id === formData.recipientId
+                    : p.editor_id === formData.recipientId
+                );
+
+                if (filteredProjects.length === 0) {
+                  return <p className="text-sm text-muted-foreground">No projects available for this {getRecipientLabel().toLowerCase()}</p>;
+                }
+
+                return (
+                  <div className="space-y-2">
+                    {filteredProjects.map((project) => (
+                      <div key={project.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={project.id}
+                          checked={selectedProjects.has(project.id)}
+                          onCheckedChange={() => toggleProject(project.id)}
+                        />
+                        <label
+                          htmlFor={project.id}
+                          className="flex-1 text-sm font-medium leading-none cursor-pointer"
+                        >
+                          {project.name} - ₹{Number(project.fee).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </ScrollArea>
           </div>
 
@@ -391,7 +501,7 @@ export default function EnhancedCreateInvoiceDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || selectedProjects.size === 0 || !formData.clientId}>
+            <Button type="submit" disabled={loading || (selectedProjects.size === 0 && !includeMonthlyFee) || !formData.recipientId}>
               {loading ? "Creating..." : "Create Invoice"}
             </Button>
           </DialogFooter>

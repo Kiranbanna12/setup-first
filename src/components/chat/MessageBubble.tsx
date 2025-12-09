@@ -3,6 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MessageActionsMenu } from "./MessageActionsMenu";
 import { MessageStatusTicks, MessageStatus } from "./MessageStatusTicks";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 interface MessageBubbleProps {
   message: any;
@@ -92,7 +93,10 @@ export const MessageBubble = ({
   };
 
   return (
-    <div className={`flex ${isOwnMessage ? "justify-end" : "justify-start"} px-1 md:px-3 py-0.5`}>
+    <div
+      id={`message-${message.id}`}
+      className={`flex ${isOwnMessage ? "justify-end" : "justify-start"} px-1 md:px-3 py-0.5`}
+    >
       <div className="flex gap-2 max-w-[85%] md:max-w-[75%] lg:max-w-[65%] group">
         {/* Avatar for other users - WhatsApp style circular with dynamic color */}
         {!isOwnMessage && (
@@ -112,21 +116,67 @@ export const MessageBubble = ({
 
         <div className="flex-1 flex flex-col gap-0.5">
           {/* Reply Reference - WhatsApp Professional Style */}
-          {message.reply_to_message_id && message.reply_to && (
-            <div
-              className={`mb-1 px-2.5 py-1.5 rounded-md border-l-4 cursor-pointer hover:bg-black/5 transition-colors ${isOwnMessage
-                  ? "bg-black/10 border-white/50"
-                  : "bg-white/60 dark:bg-white/10 border-primary"
-                }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
+
+
+          {/* Message Content - Responsive */}
+          <div className={`relative rounded-lg px-2.5 sm:px-3 py-1.5 ${isOwnMessage
+            ? "bg-[#d9fdd3] dark:bg-[#005c4b] text-foreground dark:text-white pl-7 sm:pl-8 pr-2"
+            : "bg-muted pl-2 pr-7 sm:pr-8"
+            } ${message.is_pinned ? 'ring-2 ring-yellow-400' : ''}`}>
+            {/* Pinned Indicator */}
+            {message.is_pinned && (
+              <div className="absolute -top-2 left-1.5 sm:left-2 bg-yellow-400 text-yellow-900 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded-full font-semibold z-10">
+                Pinned
+              </div>
+            )}
+
+            {/* Reply Reference - Moved inside bubble */}
+            {message.reply_to_message_id && message.reply_to && (
+              <div
+                className={`mb-2 rounded-md overflow-hidden border-l-4 cursor-pointer hover:opacity-90 transition-opacity bg-black/5 dark:bg-black/20`}
+                style={{
+                  borderLeftColor: '#00897B'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const element = document.getElementById(`message-${message.reply_to_message_id}`);
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    // Add smooth, light highlight classes
+                    element.classList.add(
+                      'ring-2',
+                      'ring-[#00897B]/50',
+                      'bg-[#00897B]/10',
+                      'dark:bg-[#00897B]/20',
+                      'transition-all',
+                      'duration-1000',
+                      'ease-in-out'
+                    );
+
+                    // Remove after delay
+                    setTimeout(() => {
+                      element.classList.remove(
+                        'ring-2',
+                        'ring-[#00897B]/50',
+                        'bg-[#00897B]/10',
+                        'dark:bg-[#00897B]/20'
+                      );
+                      // Keep transition for smooth fade out, then remove it
+                      setTimeout(() => {
+                        element.classList.remove('transition-all', 'duration-1000', 'ease-in-out');
+                      }, 1000);
+                    }, 2000);
+                  } else {
+                    toast.info("Message not found in current view");
+                  }
+                }}
+              >
+                <div className="px-2 py-1.5 bg-opacity-10 w-full relative">
                   <p
-                    className="text-[12px] font-semibold mb-0.5 truncate"
+                    className="text-[12px] font-bold mb-0.5 truncate"
                     style={{
-                      color: message.reply_to.sender_id === currentUserId
-                        ? (isOwnMessage ? 'rgba(255,255,255,0.9)' : '#00897B')
-                        : (isOwnMessage ? 'rgba(255,255,255,0.8)' : getColorForSenderId(message.reply_to.sender_id))
+                      color: '#00897B'
                     }}
                   >
                     {message.reply_to.sender_id === currentUserId
@@ -134,32 +184,10 @@ export const MessageBubble = ({
                       : (message.reply_to.sender_name || 'User')
                     }
                   </p>
-                  <p
-                    className={`text-[13px] leading-[18px] line-clamp-2 ${isOwnMessage ? "text-white/70" : "text-foreground/70"
-                      }`}
-                  >
-                    {message.reply_to.content}
+                  <p className={`text-[12.5px] line-clamp-2 leading-tight ${isOwnMessage ? "text-black/70 dark:text-white/70" : "text-foreground/70"}`}>
+                    {message.reply_to.content || "Media"}
                   </p>
                 </div>
-                <div className={`flex-shrink-0 ${isOwnMessage ? "text-white/40" : "text-muted-foreground/40"}`}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M9 10l-5 5 5 5" />
-                    <path d="M20 4v7a4 4 0 0 1-4 4H4" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Message Content - Responsive */}
-          <div className={`relative rounded-lg px-2.5 sm:px-3 py-1.5 ${isOwnMessage
-              ? "bg-[#d9fdd3] dark:bg-[#005c4b] text-foreground dark:text-white pl-7 sm:pl-8 pr-2"
-              : "bg-muted pl-2 pr-7 sm:pr-8"
-            } ${message.is_pinned ? 'ring-2 ring-yellow-400' : ''}`}>
-            {/* Pinned Indicator */}
-            {message.is_pinned && (
-              <div className="absolute -top-2 left-1.5 sm:left-2 bg-yellow-400 text-yellow-900 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded-full font-semibold">
-                Pinned
               </div>
             )}
 

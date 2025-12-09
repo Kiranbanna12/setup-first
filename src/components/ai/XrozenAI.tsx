@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useRef } from 'react';
-import { Sparkles, X, Send, Loader2, Minimize2, Maximize2, ExternalLink, Fullscreen, GripVertical, Settings } from 'lucide-react';
+import { Sparkles, X, Send, Loader2, Minimize2, Maximize2, ExternalLink, Fullscreen, GripVertical, Settings, Lock } from 'lucide-react';
+import { useSubscriptionLimits } from '@/hooks/useSubscriptionLimits';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -156,13 +157,18 @@ export function XrozenAI() {
     }
   }, [messages, loading]);
 
-  // Load conversation history
-  useEffect(() => {
-    if (isOpen && isAuthenticated) {
-      loadRecentConversation();
-    }
-  }, [isOpen, isAuthenticated]);
+  const { hasActiveSubscription, loading: limitsLoading } = useSubscriptionLimits();
 
+  // Reset chat when opening (New Chat every time)
+  useEffect(() => {
+    if (isOpen) {
+      setConversationId(null);
+      setMessages([]);
+      // We do NOT load recent conversation here anymore
+    }
+  }, [isOpen]);
+
+  // Kept for manual history loading if needed later, but not auto-triggered
   const loadRecentConversation = async () => {
     try {
       if (!currentUser) return;
@@ -482,153 +488,218 @@ export function XrozenAI() {
 
           {!isMinimized && (
             <>
-              {/* Messages */}
-              <ScrollArea className="flex-1 px-3 py-4 sm:p-4" ref={scrollRef}>
-                <div className="space-y-3 sm:space-y-4">
-                  {messages.length === 0 && (
-                    <div className="text-center text-muted-foreground py-6 sm:py-8 px-2">
-                      <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-glow">
-                        <Sparkles className="h-7 w-7 sm:h-8 sm:w-8 text-primary" />
-                      </div>
-                      <h4 className="font-bold text-base sm:text-lg mb-2">Welcome to XrozenAI!</h4>
-                      <p className="text-xs sm:text-sm mb-4 sm:mb-6 text-muted-foreground/80 max-w-xs mx-auto">I can help you manage your workflow and perform actions</p>
-                      <div className="text-xs sm:text-sm space-y-2 bg-muted/50 rounded-lg p-3 sm:p-4">
-                        <p className="font-semibold text-sm sm:text-base mb-2 sm:mb-3">Try asking:</p>
-                        <ul className="space-y-1.5 sm:space-y-2 text-left">
-                          <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
-                            <span className="text-primary flex-shrink-0">•</span>
-                            <span className="break-words">"Create a new project called Marketing Video"</span>
-                          </li>
-                          <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
-                            <span className="text-primary flex-shrink-0">•</span>
-                            <span className="break-words">"Add a client named John Doe"</span>
-                          </li>
-                          <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
-                            <span className="text-primary flex-shrink-0">•</span>
-                            <span className="break-words">"Show me pending payments"</span>
-                          </li>
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={cn(
-                        "flex flex-col gap-1.5 sm:gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300",
-                        msg.role === 'user' ? 'items-end' : 'items-start'
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 shadow-sm break-words",
-                          msg.role === 'user'
-                            ? 'bg-primary text-primary-foreground rounded-br-md'
-                            : 'bg-muted rounded-bl-md'
-                        )}
-                      >
-                        {msg.role === 'assistant' ? (
-                          <div className="text-xs sm:text-sm prose prose-xs sm:prose-sm dark:prose-invert max-w-none [&>*]:text-xs [&>*]:sm:text-sm">
-                            <ReactMarkdown
-                              components={{
-                                a: ({ node, ...props }) => (
-                                  <a
-                                    {...props}
-                                    className="text-primary font-semibold underline decoration-primary/30 hover:decoration-primary transition-all"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                  />
-                                )
-                              }}
-                            >
-                              {msg.content}
-                            </ReactMarkdown>
-                          </div>
-                        ) : (
-                          <p className="text-xs sm:text-sm whitespace-pre-wrap">{msg.content}</p>
-                        )}
-                        <p className="text-[10px] sm:text-xs opacity-50 mt-1">
-                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-
-                      {msg.actionData && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (msg.actionData?.id) {
-                              const routePrefix = msg.actionData.type === 'editor' || msg.actionData.type === 'client'
-                                ? `${msg.actionData.type}s/${msg.actionData.id}/worksheet`
-                                : `${msg.actionData.type}s/${msg.actionData.id}`;
-
-                              // Handle generic list navigation if id is missing or special
-                              if (!msg.actionData.id) {
-                                navigate(`/${msg.actionData.type}s`);
-                              } else {
-                                navigate(`/${routePrefix}`);
-                              }
-                            } else {
-                              navigate(`/${msg.actionData!.type}s`);
-                            }
-                            setIsOpen(false);
-                          }}
-                          className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
-                        >
-                          <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                          View {msg.actionData.type}
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-
-                  {loading && (
-                    <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
-                      <div className="bg-muted rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 flex items-center gap-2 rounded-bl-md shadow-sm">
-                        <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin text-primary flex-shrink-0" />
-                        <span className="text-xs sm:text-sm text-muted-foreground">XrozenAI is thinking...</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-
-              {/* Input - Mobile Optimized */}
-              <div className="flex-shrink-0 px-3 py-3 sm:p-4 border-t bg-card/50 backdrop-blur-sm">
-                <div className="flex gap-2 items-end bg-muted/50 rounded-2xl p-2 sm:p-2.5 border border-border/40">
-                  <Textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage();
-                      }
-                    }}
-                    placeholder="Ask XrozenAI anything..."
-                    disabled={loading}
-                    className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 min-h-[44px] sm:min-h-[52px] max-h-[100px] sm:max-h-[120px] resize-none text-xs sm:text-sm px-2 sm:px-3 py-2"
-                    rows={1}
-                  />
+              {(!limitsLoading && !hasActiveSubscription) ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                    <Lock className="w-8 h-8 text-primary" />
+                  </div>
+                  <h3 className="font-bold text-lg mb-2">Upgrade to Premium</h3>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    XrozenAI assistant is available for Premium users. Upgrade to unlock intelligent workflow automation.
+                  </p>
                   <Button
-                    onClick={sendMessage}
-                    disabled={!input.trim() || loading}
-                    size="icon"
-                    className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-primary hover:bg-primary/90 flex-shrink-0 transition-all hover:scale-105"
+                    className="w-full"
+                    onClick={() => {
+                      setIsOpen(false);
+                      navigate('/subscription-management');
+                    }}
                   >
-                    {loading ? (
-                      <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4 sm:h-5 sm:w-5" />
-                    )}
+                    Upgrade Subscription
                   </Button>
                 </div>
-                <p className="text-[10px] sm:text-xs text-muted-foreground mt-2 text-center">
-                  <span className="hidden sm:inline">Press Enter to send • Shift+Enter for new line • </span>
-                  Powered by Xrozen
-                </p>
-              </div>
+              ) : (
+                <>
+                  {/* Messages */}
+                  <ScrollArea className="flex-1 px-3 py-4 sm:p-4" ref={scrollRef}>
+                    <div className="space-y-3 sm:space-y-4">
+                      {messages.length === 0 && (
+                        <div className="text-center text-muted-foreground py-6 sm:py-8 px-2">
+                          <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-glow">
+                            <Sparkles className="h-7 w-7 sm:h-8 sm:w-8 text-primary" />
+                          </div>
+                          <h4 className="font-bold text-base sm:text-lg mb-2">Welcome to XrozenAI!</h4>
+                          <p className="text-xs sm:text-sm mb-4 sm:mb-6 text-muted-foreground/80 max-w-xs mx-auto">I can help you manage your workflow and perform actions</p>
+                          <div className="text-xs sm:text-sm space-y-2 bg-muted/50 rounded-lg p-3 sm:p-4">
+                            <p className="font-semibold text-sm sm:text-base mb-2 sm:mb-3">Try asking:</p>
+                            <ul className="space-y-1.5 sm:space-y-2 text-left">
+                              <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
+                                <span className="text-primary flex-shrink-0">•</span>
+                                <span className="break-words">"Create a new project called Marketing Video"</span>
+                              </li>
+                              <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
+                                <span className="text-primary flex-shrink-0">•</span>
+                                <span className="break-words">"Add a client named John Doe"</span>
+                              </li>
+                              <li className="flex items-start gap-2 p-2 bg-background/50 rounded-md hover:bg-accent/50 transition-colors">
+                                <span className="text-primary flex-shrink-0">•</span>
+                                <span className="break-words">"Show me pending payments"</span>
+                              </li>
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+
+                      {messages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={cn(
+                            "flex flex-col gap-1.5 sm:gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300",
+                            msg.role === 'user' ? 'items-end' : 'items-start'
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "max-w-[85%] sm:max-w-[80%] rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 shadow-sm break-words",
+                              msg.role === 'user'
+                                ? 'bg-primary text-primary-foreground rounded-br-md'
+                                : 'bg-muted rounded-bl-md'
+                            )}
+                          >
+                            {msg.role === 'assistant' ? (
+                              <div className="text-xs sm:text-sm prose prose-xs sm:prose-sm dark:prose-invert max-w-none [&>*]:text-xs [&>*]:sm:text-sm">
+                                <ReactMarkdown
+                                  components={{
+                                    a: ({ node, href, children, ...props }) => {
+                                      // Check if it's an internal app link
+                                      const isInternal = href && (
+                                        href.startsWith(window.location.origin) ||
+                                        href.startsWith('/') ||
+                                        href.startsWith('http://localhost') ||
+                                        href.includes('workflow.xrozen.com')
+                                      );
+
+                                      if (isInternal && href) {
+                                        // Extract path from full URL or use relative path
+                                        let path = href;
+                                        try {
+                                          if (href.startsWith('http')) {
+                                            const url = new URL(href);
+                                            path = url.pathname + url.search;
+                                          }
+                                        } catch (e) {
+                                          path = href;
+                                        }
+
+                                        return (
+                                          <a
+                                            {...props}
+                                            href={path}
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              navigate(path);
+                                              setIsOpen(false);
+                                            }}
+                                            className="text-primary font-semibold underline decoration-primary/30 hover:decoration-primary transition-all cursor-pointer"
+                                          >
+                                            {children}
+                                          </a>
+                                        );
+                                      }
+
+                                      // External link - open in new tab
+                                      return (
+                                        <a
+                                          {...props}
+                                          href={href}
+                                          className="text-primary font-semibold underline decoration-primary/30 hover:decoration-primary transition-all"
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                        >
+                                          {children}
+                                        </a>
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {msg.content}
+                                </ReactMarkdown>
+                              </div>
+                            ) : (
+                              <p className="text-xs sm:text-sm whitespace-pre-wrap">{msg.content}</p>
+                            )}
+                            <p className="text-[10px] sm:text-xs opacity-50 mt-1">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+
+                          {msg.actionData && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (msg.actionData?.id) {
+                                  const routePrefix = msg.actionData.type === 'editor' || msg.actionData.type === 'client'
+                                    ? `${msg.actionData.type}s/${msg.actionData.id}/worksheet`
+                                    : `${msg.actionData.type}s/${msg.actionData.id}`;
+
+                                  // Handle generic list navigation if id is missing or special
+                                  if (!msg.actionData.id) {
+                                    navigate(`/${msg.actionData.type}s`);
+                                  } else {
+                                    navigate(`/${routePrefix}`);
+                                  }
+                                } else {
+                                  navigate(`/${msg.actionData!.type}s`);
+                                }
+                                setIsOpen(false);
+                              }}
+                              className="gap-1.5 text-[10px] sm:text-xs h-7 sm:h-8 px-2 sm:px-3"
+                            >
+                              <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                              View {msg.actionData.type}
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+
+                      {loading && (
+                        <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
+                          <div className="bg-muted rounded-2xl px-3 py-2.5 sm:px-4 sm:py-3 flex items-center gap-2 rounded-bl-md shadow-sm">
+                            <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin text-primary flex-shrink-0" />
+                            <span className="text-xs sm:text-sm text-muted-foreground">XrozenAI is thinking...</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+
+                  {/* Input - Mobile Optimized */}
+                  <div className="flex-shrink-0 px-3 py-3 sm:p-4 border-t bg-card/50 backdrop-blur-sm">
+                    <div className="flex gap-2 items-end bg-muted/50 rounded-2xl p-2 sm:p-2.5 border border-border/40">
+                      <Textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage();
+                          }
+                        }}
+                        placeholder="Ask XrozenAI anything..."
+                        disabled={loading}
+                        className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 min-h-[44px] sm:min-h-[52px] max-h-[100px] sm:max-h-[120px] resize-none text-xs sm:text-sm px-2 sm:px-3 py-2"
+                        rows={1}
+                      />
+                      <Button
+                        onClick={sendMessage}
+                        disabled={!input.trim() || loading}
+                        size="icon"
+                        className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-primary hover:bg-primary/90 flex-shrink-0 transition-all hover:scale-105"
+                      >
+                        {loading ? (
+                          <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4 sm:h-5 sm:w-5" />
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground mt-2 text-center">
+                      <span className="hidden sm:inline">Press Enter to send • Shift+Enter for new line • </span>
+                      Powered by Xrozen
+                    </p>
+                  </div>
+                </>
+              )}
             </>
           )}
         </Card>

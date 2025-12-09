@@ -231,7 +231,7 @@ export const FeedbackForm = ({
                         </div>
 
                         {useCurrentTime && isYouTube && (
-                            <p className="text-xs text-muted-foreground text-green-600">
+                            <p className="text-xs text-success">
                                 ✓ Auto-tracking enabled for YouTube
                             </p>
                         )}

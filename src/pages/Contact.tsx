@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Header } from "@/components/shared/Header";
 import { Footer } from "@/components/shared/Footer";
 import { Button } from "@/components/ui/button";
@@ -5,12 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Mail, MapPin, Phone, MessageSquare } from "lucide-react";
+import { Mail, MessageSquare, Send, Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 const Contact = () => {
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -21,144 +23,182 @@ const Contact = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
-    // Simulate form submission
-    setTimeout(() => {
-      toast.success("Message sent successfully! We'll get back to you soon.");
-      setFormData({ name: "", email: "", subject: "", message: "" });
+
+    try {
+      // Call the edge function to send contact email
+      const { data, error } = await supabase.functions.invoke('send-contact-email', {
+        body: formData
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Failed to send message');
+      }
+
+      if (data?.success) {
+        setSubmitted(true);
+        toast.success("Message sent successfully!");
+        setFormData({ name: "", email: "", subject: "", message: "" });
+      } else {
+        throw new Error(data?.error || 'Failed to send message');
+      }
+    } catch (err: any) {
+      console.error('Contact form error:', err);
+      toast.error(err.message || "Failed to send message. Please try again.");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
-  const contactInfo = [
-    {
-      icon: Mail,
-      title: "Email Us",
-      content: "support@xrozen.com",
-      description: "We'll respond within 24 hours"
-    },
-    {
-      icon: Phone,
-      title: "Call Us",
-      content: "+91 98765 43210",
-      description: "Mon-Fri, 9AM-6PM IST"
-    },
-    {
-      icon: MapPin,
-      title: "Visit Us",
-      content: "Mumbai, Maharashtra",
-      description: "India"
-    }
-  ];
+  const handleSendAnother = () => {
+    setSubmitted(false);
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-zinc-950 text-white dark">
       <Header />
-      
-      <main className="flex-1 bg-gradient-to-br from-background via-primary/5 to-success/5">
+
+      <main className="flex-1 bg-zinc-950">
         {/* Hero Section */}
         <section className="container mx-auto px-4 py-20 text-center">
-          <MessageSquare className="w-16 h-16 text-primary mx-auto mb-6" />
-          <h1 className="text-5xl md:text-6xl font-bold mb-6">Get in Touch</h1>
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-primary/10 mb-6">
+            <MessageSquare className="w-10 h-10 text-primary" />
+          </div>
+          <h1 className="text-4xl md:text-6xl font-bold mb-6">Get in Touch</h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Have questions? We're here to help. Reach out to our team and we'll respond as soon as possible.
+            Have questions or feedback? We'd love to hear from you.
           </p>
         </section>
 
-        {/* Contact Info Cards */}
+        {/* Email Info */}
         <section className="container mx-auto px-4 pb-12">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {contactInfo.map((info, index) => {
-              const Icon = info.icon;
-              return (
-                <Card key={index} className="shadow-elegant hover:shadow-glow transition-smooth text-center border border-border">
-                  <CardHeader>
-                    <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mx-auto mb-4">
-                      <Icon className="w-6 h-6 text-primary" />
-                    </div>
-                    <CardTitle className="text-lg text-foreground">{info.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="font-semibold mb-1 text-foreground">{info.content}</p>
-                    <p className="text-sm text-muted-foreground">{info.description}</p>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+          <Card className="max-w-md mx-auto shadow-elegant text-center border border-border">
+            <CardHeader>
+              <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Mail className="w-7 h-7 text-primary" />
+              </div>
+              <CardTitle className="text-xl">Email Us</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <a
+                href="mailto:support@xrozen.com"
+                className="text-lg font-semibold text-primary hover:underline"
+              >
+                support@xrozen.com
+              </a>
+              <p className="text-sm text-muted-foreground mt-2">
+                We typically respond within 24 hours
+              </p>
+            </CardContent>
+          </Card>
         </section>
 
         {/* Contact Form */}
         <section className="container mx-auto px-4 pb-20">
           <Card className="max-w-2xl mx-auto shadow-elegant">
-            <CardHeader>
-              <CardTitle className="text-2xl">Send us a Message</CardTitle>
-              <CardDescription>
-                Fill out the form below and we'll get back to you within 24 hours
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Full Name *</Label>
-                    <Input
-                      id="name"
-                      placeholder="John Doe"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="john@example.com"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      required
-                    />
-                  </div>
+            {submitted ? (
+              // Success State
+              <CardContent className="py-16 text-center">
+                <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 className="w-10 h-10 text-success" />
                 </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="subject">Subject *</Label>
-                  <Input
-                    id="subject"
-                    placeholder="How can we help you?"
-                    value={formData.subject}
-                    onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                    required
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="message">Message *</Label>
-                  <Textarea
-                    id="message"
-                    placeholder="Tell us more about your inquiry..."
-                    rows={6}
-                    value={formData.message}
-                    onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                    required
-                  />
-                </div>
-
+                <h3 className="text-2xl font-bold mb-2">Message Sent!</h3>
+                <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                  Thank you for reaching out. We've received your message and will get back to you at the email you provided within 24 hours.
+                </p>
                 <Button
-                  type="submit"
-                  className="w-full gradient-primary"
-                  disabled={loading}
+                  variant="outline"
+                  onClick={handleSendAnother}
                 >
-                  {loading ? "Sending..." : "Send Message"}
+                  Send Another Message
                 </Button>
-              </form>
-            </CardContent>
+              </CardContent>
+            ) : (
+              // Form State
+              <>
+                <CardHeader>
+                  <CardTitle className="text-2xl">Send us a Message</CardTitle>
+                  <CardDescription>
+                    Fill out the form below and we'll get back to you soon
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Your Name *</Label>
+                        <Input
+                          id="name"
+                          placeholder="John Doe"
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          required
+                          disabled={loading}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="email">Your Email *</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="john@example.com"
+                          value={formData.email}
+                          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                          required
+                          disabled={loading}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="subject">Subject *</Label>
+                      <Input
+                        id="subject"
+                        placeholder="How can we help you?"
+                        value={formData.subject}
+                        onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="message">Message *</Label>
+                      <Textarea
+                        id="message"
+                        placeholder="Tell us more about your inquiry..."
+                        rows={6}
+                        value={formData.message}
+                        onChange={(e) => setFormData({ ...formData, message: e.target.value })}
+                        required
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <Button
+                      type="submit"
+                      className="w-full gradient-primary"
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4 mr-2" />
+                          Send Message
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </CardContent>
+              </>
+            )}
           </Card>
         </section>
       </main>
-      
+
       <Footer />
     </div>
   );

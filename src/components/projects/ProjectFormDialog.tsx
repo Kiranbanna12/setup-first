@@ -39,14 +39,29 @@ interface SubProject {
   deadline: string;
 }
 
+interface Editor {
+  id: string;
+  full_name: string;
+  employment_type: string;
+  email?: string;
+}
+
+interface Client {
+  id: string;
+  full_name: string;
+  company?: string;
+  employment_type: string;
+  email?: string;
+}
+
 interface ProjectFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingProject: any;
   onSubmit: (data: any) => void;
-  editors: any[];
-  clients: any[];
-  parentProjectId?: string;
+  editors: Editor[];
+  clients: Client[];
+  parentProjectId?: string | null;
 }
 
 export const ProjectFormDialog = ({
@@ -62,6 +77,7 @@ export const ProjectFormDialog = ({
   const [hasSubProject, setHasSubProject] = useState(false);
   const [subProjects, setSubProjects] = useState<SubProject[]>([]);
   const [invoicePaid, setInvoicePaid] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ProjectFormData>({
     name: "",
     description: "",
@@ -207,6 +223,9 @@ export const ProjectFormDialog = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Prevent double submission
+    if (isSubmitting) return;
+
     // Validation
     if (!formData.name.trim()) {
       toast.error("Project name is required");
@@ -266,32 +285,19 @@ export const ProjectFormDialog = ({
       subProjects: hasSubProject ? subProjects : []
     };
 
-    onSubmit(submitData);
+    try {
+      setIsSubmitting(true);
+      await onSubmit(submitData);
+    } finally {
+      // Reset after a short delay to allow UI to update
+      setTimeout(() => setIsSubmitting(false), 500);
+    }
   };
 
   const validateUserPermissions = () => {
     if (!currentUser) return true; // Skip validation if user not loaded yet
 
-    const userCategory = currentUser.user_category;
-
-    // Editor can only add clients
-    if (userCategory === 'editor') {
-      if (formData.editor_id && !editingProject) {
-        toast.error("Editors can only assign clients, not other editors");
-        return false;
-      }
-    }
-
-    // Client can only add editors
-    if (userCategory === 'client') {
-      if (formData.client_id && !editingProject) {
-        toast.error("Clients can only assign editors, not other clients");
-        return false;
-      }
-    }
-
-    // Agency can add both (no restrictions)
-
+    // Basic validation is handled by UI hiding, but double check here
     return true;
   };
 
@@ -323,6 +329,8 @@ export const ProjectFormDialog = ({
       return false;
     }
   };
+
+  const userCategory = currentUser?.user_category;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -369,55 +377,79 @@ export const ProjectFormDialog = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            {/* Show Editor field only if user is NOT an editor or if editing */}
-            {(currentUser?.user_category !== 'editor' || editingProject) && (
+            {/* 
+              ROLE BASED VISIBILITY:
+              - Agency: Sees BOTH Editor and Client selects.
+              - Client: Sees ONLY Editor select (Assign an editor).
+              - Editor: Sees ONLY Client select (Work for a client).
+            */}
+
+            {/* Editor Selection: Visible to Agency and Client */}
+            {(userCategory === 'agency' || userCategory === 'client' || editingProject) && (
               <div className="space-y-2">
-                <Label htmlFor="editor" className="text-xs sm:text-sm">Editor</Label>
-                <Select
-                  value={formData.editor_id}
-                  onValueChange={(value) => setFormData({ ...formData, editor_id: value, fee: "" })}
-                  disabled={currentUser?.user_category === 'editor' && !editingProject}
-                >
-                  <SelectTrigger className="h-9 text-xs sm:text-sm">
-                    <SelectValue placeholder="Select editor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {editors.map((editor) => (
-                      <SelectItem key={editor.id} value={editor.id} className="text-xs sm:text-sm">
-                        {editor.full_name} ({editor.employment_type})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="editor" className="text-xs sm:text-sm">Assigned Editor</Label>
+                {editors.length === 0 ? (
+                  <div className="p-3 border border-dashed border-warning/50 bg-warning/5 rounded-lg">
+                    <p className="text-xs sm:text-sm text-warning font-medium">No editors available</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Please add editors from the <span className="font-medium text-primary">Editors</span> page first.
+                    </p>
+                  </div>
+                ) : (
+                  <Select
+                    value={formData.editor_id}
+                    onValueChange={(value) => setFormData({ ...formData, editor_id: value, fee: "" })}
+                    disabled={userCategory === 'editor' && !editingProject}
+                  >
+                    <SelectTrigger className="h-9 text-xs sm:text-sm">
+                      <SelectValue placeholder="Select editor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editors.map((editor) => (
+                        <SelectItem key={editor.id} value={editor.id} className="text-xs sm:text-sm">
+                          {editor.full_name} ({editor.employment_type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             )}
 
-            {/* Show Client field only if user is NOT a client or if editing */}
-            {(currentUser?.user_category !== 'client' || editingProject) && (
+            {/* Client Selection: Visible to Agency and Editor */}
+            {(userCategory === 'agency' || userCategory === 'editor' || editingProject) && (
               <div className="space-y-2">
-                <Label htmlFor="client" className="text-xs sm:text-sm">Client</Label>
-                <Select
-                  value={formData.client_id}
-                  onValueChange={(value) => setFormData({ ...formData, client_id: value })}
-                  disabled={currentUser?.user_category === 'client' && !editingProject}
-                >
-                  <SelectTrigger className="h-9 text-xs sm:text-sm">
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clients.map((client) => (
-                      <SelectItem key={client.id} value={client.id} className="text-xs sm:text-sm">
-                        {client.full_name} {client.company ? `(${client.company})` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="client" className="text-xs sm:text-sm">Assigned Client</Label>
+                {clients.length === 0 ? (
+                  <div className="p-3 border border-dashed border-warning/50 bg-warning/5 rounded-lg">
+                    <p className="text-xs sm:text-sm text-warning font-medium">No clients available</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Please add clients from the <span className="font-medium text-primary">Clients</span> page first.
+                    </p>
+                  </div>
+                ) : (
+                  <Select
+                    value={formData.client_id}
+                    onValueChange={(value) => setFormData({ ...formData, client_id: value })}
+                    disabled={userCategory === 'client' && !editingProject}
+                  >
+                    <SelectTrigger className="h-9 text-xs sm:text-sm">
+                      <SelectValue placeholder="Select client" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map((client) => (
+                        <SelectItem key={client.id} value={client.id} className="text-xs sm:text-sm">
+                          {client.full_name} {client.company ? `(${client.company})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             )}
           </div>
 
           {/* Role-Based Pricing Section */}
-          {/* Show pricing section when either freelance editor OR freelance client is selected */}
           {((formData.editor_id && editors.find(e => e.id === formData.editor_id)?.employment_type === 'freelance') ||
             (formData.client_id && clients.find(c => c.id === formData.client_id)?.employment_type === 'freelance')) && (
               <div className="border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -433,13 +465,14 @@ export const ProjectFormDialog = ({
                   </div>
                 )}
 
-                {/* Agency View: Client Fee + Editor Fee */}
-                {currentUser?.user_category === 'agency' && (
+                {/* Agency View: Client Fee + Editor Fee + Margin */}
+                {userCategory === 'agency' && (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="client_fee" className="text-xs sm:text-sm">
-                        Client Fee (₹) <span className="text-muted-foreground">- Amount charged to client</span>
-                      </Label>
+                      <div className="flex justify-between">
+                        <Label htmlFor="client_fee" className="text-xs sm:text-sm">Client Fee (₹)</Label>
+                        <span className="text-[10px] text-muted-foreground">Amount charged to client</span>
+                      </div>
                       <Input
                         id="client_fee"
                         type="number"
@@ -458,9 +491,10 @@ export const ProjectFormDialog = ({
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="editor_fee" className="text-xs sm:text-sm">
-                        Editor Fee (₹) <span className="text-muted-foreground">- Amount paid to editor</span>
-                      </Label>
+                      <div className="flex justify-between">
+                        <Label htmlFor="editor_fee" className="text-xs sm:text-sm">Editor Fee (₹)</Label>
+                        <span className="text-[10px] text-muted-foreground">Amount paid to editor</span>
+                      </div>
                       <Input
                         id="editor_fee"
                         type="number"
@@ -478,16 +512,16 @@ export const ProjectFormDialog = ({
                       />
                     </div>
 
-                    {formData.client_fee && formData.editor_fee && (
-                      <div className="p-3 bg-background rounded border">
-                        <p className="text-sm font-medium">Your Margin: ₹{formData.agency_margin || "0"}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Profit from this project
-                        </p>
+                    <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Agency Margin</span>
+                        <span className="text-lg font-bold text-primary">₹{parseFloat(formData.agency_margin || "0").toFixed(2)}</span>
                       </div>
-                    )}
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Calculated profit (Client Fee - Editor Fee)
+                      </p>
+                    </div>
 
-                    {/* Hide Editor from Client Option */}
                     <div className="flex items-center space-x-2 pt-2">
                       <Checkbox
                         id="hide-editor"
@@ -502,7 +536,7 @@ export const ProjectFormDialog = ({
                 )}
 
                 {/* Editor View: Editor Fee Only */}
-                {currentUser?.user_category === 'editor' && (
+                {userCategory === 'editor' && (
                   <div className="space-y-2">
                     <Label htmlFor="editor_fee" className="text-xs sm:text-sm">
                       Your Fee (₹) <span className="text-muted-foreground">- Your earnings from this project</span>
@@ -521,7 +555,7 @@ export const ProjectFormDialog = ({
                 )}
 
                 {/* Client View: Client Fee Only */}
-                {currentUser?.user_category === 'client' && (
+                {userCategory === 'client' && (
                   <div className="space-y-2">
                     <Label htmlFor="client_fee" className="text-xs sm:text-sm">
                       Project Budget (₹) <span className="text-muted-foreground">- Your investment in this project</span>
@@ -540,7 +574,7 @@ export const ProjectFormDialog = ({
                 )}
 
                 {/* Default/Fallback: Simple Fee */}
-                {!currentUser?.user_category && (
+                {!userCategory && (
                   <div className="space-y-2">
                     <Label htmlFor="fee" className="text-xs sm:text-sm">Project Fee (₹)</Label>
                     <Input
@@ -671,7 +705,7 @@ export const ProjectFormDialog = ({
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                        {(currentUser?.user_category !== 'editor' || editingProject) && (
+                        {(userCategory !== 'editor' || editingProject) && (
                           <div className="space-y-2">
                             <Label className="text-xs">Editor</Label>
                             <Select
@@ -692,7 +726,7 @@ export const ProjectFormDialog = ({
                           </div>
                         )}
 
-                        {(currentUser?.user_category !== 'client' || editingProject) && (
+                        {(userCategory !== 'client' || editingProject) && (
                           <div className="space-y-2">
                             <Label className="text-xs">Client</Label>
                             <Select
@@ -741,8 +775,12 @@ export const ProjectFormDialog = ({
             </div>
           )}
 
-          <Button type="submit" className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary">
-            {editingProject ? "Update Project" : "Create Project"}
+          <Button
+            type="submit"
+            className="w-full h-9 sm:h-10 text-xs sm:text-sm gradient-primary"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? "Creating..." : (editingProject ? "Update Project" : "Create Project")}
           </Button>
         </form>
       </DialogContent>

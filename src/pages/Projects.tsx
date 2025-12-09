@@ -25,15 +25,15 @@ const Projects = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [parentProjectId, setParentProjectId] = useState<string | null>(null);
   const [limitDialogOpen, setLimitDialogOpen] = useState(false);
-  const { canAddProject, hasActiveSubscription, refreshLimits } = useSubscriptionLimits();
+  const { canAddProject, hasActiveSubscription, refreshLimits, projectCount } = useSubscriptionLimits();
 
   useEffect(() => {
-    loadProjects();
-    loadEditors();
-    loadClients();
+    // Load all data in parallel for faster loading
+    loadAllData();
   }, []);
 
-  const loadProjects = async () => {
+  // Optimized: Load all data in parallel
+  const loadAllData = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -41,98 +41,108 @@ const Projects = () => {
         return;
       }
 
+      // Run all three loads in parallel - they handle their own queries
+      await Promise.all([
+        loadProjects(session),
+        loadEditors(session),
+        loadClients(session)
+      ]);
+    } catch (error) {
+      console.error("Error loading data:", error);
+      toast.error("Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadProjects = async (session?: any) => {
+    try {
+      // Use passed session or get new one
+      if (!session) {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+        if (!session) {
+          navigate("/auth");
+          return;
+        }
+      }
+
+      const userId = session.user.id;
+
       // Get current user's email for matching in editors/clients tables
       const { data: currentProfile } = await supabase
         .from("profiles")
         .select("email")
-        .eq("id", session.user.id)
+        .eq("id", userId)
         .single();
 
       const userEmail = currentProfile?.email?.toLowerCase() || "";
 
-      // 1. Get projects I created
-      const { data: myProjects } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('created_by', session.user.id)
-        .order('created_at', { ascending: false });
+      // Run all queries in parallel for faster loading
+      const [
+        myProjectsResult,
+        editorsByUserIdResult,
+        editorsByEmailResult,
+        clientsByUserIdResult,
+        clientsByEmailResult,
+        sharedProjectsResult
+      ] = await Promise.all([
+        // 1. Get projects I created
+        supabase.from('projects').select('*').eq('created_by', userId).order('created_at', { ascending: false }),
+        // 2. Get editor entries where I am the editor (by user_id)
+        supabase.from('editors').select('id, user_id, email').eq('user_id', userId),
+        // 3. Get editor entries where I am the editor (by email)
+        userEmail ? supabase.from('editors').select('id, user_id, email').ilike('email', userEmail) : Promise.resolve({ data: [] }),
+        // 4. Get client entries where I am the client (by user_id)
+        supabase.from('clients').select('id, user_id, email').eq('user_id', userId),
+        // 5. Get client entries where I am the client (by email)
+        userEmail ? supabase.from('clients').select('id, user_id, email').ilike('email', userEmail) : Promise.resolve({ data: [] }),
+        // 6. Get shared projects
+        (supabase.rpc as any)('get_user_shared_projects')
+      ]);
 
-      // 2. Get editor entries where I am the editor
-      const { data: editorsByUserId } = await supabase
-        .from('editors')
-        .select('id, user_id, email')
-        .eq('user_id', session.user.id);
+      // Process editor entries
+      const allMyEditorEntries = [...(editorsByUserIdResult.data || []), ...(editorsByEmailResult.data || [])];
+      const myEditorIds = [...new Set(allMyEditorEntries.map((e: any) => e.id))];
 
-      const { data: editorsByEmail } = await supabase
-        .from('editors')
-        .select('id, user_id, email')
-        .ilike('email', userEmail);
+      // Process client entries
+      const allMyClientEntries = [...(clientsByUserIdResult.data || []), ...(clientsByEmailResult.data || [])];
+      const myClientIds = [...new Set(allMyClientEntries.map((c: any) => c.id))];
 
-      const allMyEditorEntries = [...(editorsByUserId || []), ...(editorsByEmail || [])];
-      const uniqueEditorIds = [...new Set(allMyEditorEntries.map((e: any) => e.id))];
-
-      // 3. Get client entries where I am the client
-      const { data: clientsByUserId } = await supabase
-        .from('clients')
-        .select('id, user_id, email')
-        .eq('user_id', session.user.id);
-
-      const { data: clientsByEmail } = await supabase
-        .from('clients')
-        .select('id, user_id, email')
-        .ilike('email', userEmail);
-
-      const allMyClientEntries = [...(clientsByUserId || []), ...(clientsByEmail || [])];
-      const uniqueClientIds = [...new Set(allMyClientEntries.map((c: any) => c.id))];
-
-      const myEditorIds = uniqueEditorIds;
-      const myClientIds = uniqueClientIds;
-
-      // 4. Get projects assigned to me as editor
-      let assignedAsEditorProjects: any[] = [];
+      // Run assigned projects queries in parallel
+      const assignedQueries = [];
       if (myEditorIds.length > 0) {
-        const { data: editorProjects } = await supabase
-          .from('projects')
-          .select('*')
-          .in('editor_id', myEditorIds)
-          .neq('created_by', session.user.id)
-          .order('created_at', { ascending: false });
-        assignedAsEditorProjects = editorProjects || [];
+        assignedQueries.push(
+          supabase.from('projects').select('*').in('editor_id', myEditorIds).neq('created_by', userId).order('created_at', { ascending: false })
+        );
+      } else {
+        assignedQueries.push(Promise.resolve({ data: [] }));
       }
 
-      // 5. Get projects assigned to me as client
-      let assignedAsClientProjects: any[] = [];
       if (myClientIds.length > 0) {
-        const { data: clientProjects } = await supabase
-          .from('projects')
-          .select('*')
-          .in('client_id', myClientIds)
-          .neq('created_by', session.user.id)
-          .order('created_at', { ascending: false });
-        assignedAsClientProjects = clientProjects || [];
+        assignedQueries.push(
+          supabase.from('projects').select('*').in('client_id', myClientIds).neq('created_by', userId).order('created_at', { ascending: false })
+        );
+      } else {
+        assignedQueries.push(Promise.resolve({ data: [] }));
       }
 
-      // 6. Get projects accessed via shared links (with edit/chat permission)
-      // Use RPC to bypass RLS on projects table
-      const { data: sharedProjectsData } = await (supabase.rpc as any)('get_user_shared_projects');
+      const [editorProjectsResult, clientProjectsResult] = await Promise.all(assignedQueries);
 
-      let sharedLinkProjects: any[] = [];
-      if (sharedProjectsData && Array.isArray(sharedProjectsData)) {
-        sharedLinkProjects = sharedProjectsData;
-      }
-
-      // Combine and deduplicate
-      const allProjects = [...(myProjects || [])];
+      // Combine and deduplicate all projects
+      const allProjects = [...(myProjectsResult.data || [])];
       const seenIds = new Set(allProjects.map(p => p.id));
 
-      for (const project of [...assignedAsEditorProjects, ...assignedAsClientProjects]) {
+      // Add assigned projects
+      for (const project of [...(editorProjectsResult.data || []), ...(clientProjectsResult.data || [])]) {
         if (!seenIds.has(project.id)) {
           allProjects.push({ ...project, isAssigned: true });
           seenIds.add(project.id);
         }
       }
 
-      // Add shared link projects (only if not already in list)
+      // Add shared link projects
+      const sharedLinkProjects = sharedProjectsResult.data && Array.isArray(sharedProjectsResult.data) ? sharedProjectsResult.data : [];
       for (const project of sharedLinkProjects) {
         if (!seenIds.has(project.id)) {
           allProjects.push(project);
@@ -147,37 +157,24 @@ const Projects = () => {
     } catch (error: any) {
       console.error("Error loading projects:", error);
       toast.error("Failed to load projects");
-    } finally {
-      setLoading(false);
     }
   };
 
-  const loadEditors = async () => {
+  const loadEditors = async (session?: any) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = session?.user;
       if (!user) return;
 
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("id", user.id)
-        .single();
-      const userEmail = currentProfile?.email?.toLowerCase() || "";
+      // Run initial queries in parallel
+      const [profileResult, myEditorsResult, clientEntriesResult] = await Promise.all([
+        supabase.from("profiles").select("email").eq("id", user.id).single(),
+        supabase.from('editors').select('*').eq('created_by', user.id).order('created_at', { ascending: false }),
+        supabase.from('clients').select('*').order('created_at', { ascending: false })
+      ]);
 
-      // 1. My editors
-      const { data: myEditors } = await supabase
-        .from('editors')
-        .select('*')
-        .eq('created_by', user.id)
-        .order('created_at', { ascending: false });
+      const userEmail = profileResult.data?.email?.toLowerCase() || "";
 
-      // 2. Linked editors (converted from clients)
-      const { data: clientEntries } = await supabase
-        .from('clients')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      const myClientEntries = (clientEntries || []).filter(
+      const myClientEntries = (clientEntriesResult.data || []).filter(
         (entry: any) => {
           const isNotMyEntry = entry.created_by !== user.id;
           const emailMatch = entry.email?.toLowerCase().trim() === userEmail.toLowerCase().trim();
@@ -185,6 +182,12 @@ const Projects = () => {
           return isNotMyEntry && (emailMatch || userIdMatch);
         }
       );
+
+      // Quick path: if no linked entries, set editors immediately
+      if (myClientEntries.length === 0) {
+        setEditors(myEditorsResult.data || []);
+        return;
+      }
 
       const creatorIds = myClientEntries.map((e: any) => e.created_by).filter(Boolean);
       let creatorProfiles: any[] = [];
@@ -210,38 +213,27 @@ const Projects = () => {
         };
       });
 
-      setEditors([...(myEditors || []), ...linkedEditors]);
+      setEditors([...(myEditorsResult.data || []), ...linkedEditors]);
     } catch (error) {
       console.error("Error loading editors:", error);
     }
   };
 
-  const loadClients = async () => {
+  const loadClients = async (session?: any) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = session?.user;
       if (!user) return;
 
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("id", user.id)
-        .single();
-      const userEmail = currentProfile?.email?.toLowerCase() || "";
+      // Run initial queries in parallel
+      const [profileResult, myClientsResult, editorEntriesResult] = await Promise.all([
+        supabase.from("profiles").select("email").eq("id", user.id).single(),
+        supabase.from('clients').select('*').eq('created_by', user.id).order('created_at', { ascending: false }),
+        supabase.from('editors').select('*').order('created_at', { ascending: false })
+      ]);
 
-      // 1. My clients
-      const { data: myClients } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('created_by', user.id)
-        .order('created_at', { ascending: false });
+      const userEmail = profileResult.data?.email?.toLowerCase() || "";
 
-      // 2. Linked clients (converted from editors)
-      const { data: editorEntries } = await supabase
-        .from('editors')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      const myEditorEntries = (editorEntries || []).filter(
+      const myEditorEntries = (editorEntriesResult.data || []).filter(
         (entry: any) => {
           const isNotMyEntry = entry.created_by !== user.id;
           const emailMatch = entry.email?.toLowerCase().trim() === userEmail.toLowerCase().trim();
@@ -249,6 +241,12 @@ const Projects = () => {
           return isNotMyEntry && (emailMatch || userIdMatch);
         }
       );
+
+      // Quick path: if no linked entries, set clients immediately
+      if (myEditorEntries.length === 0) {
+        setClients(myClientsResult.data || []);
+        return;
+      }
 
       const creatorIds = myEditorEntries.map((e: any) => e.created_by).filter(Boolean);
       let creatorProfiles: any[] = [];
@@ -274,7 +272,7 @@ const Projects = () => {
         };
       });
 
-      setClients([...(myClients || []), ...linkedClients]);
+      setClients([...(myClientsResult.data || []), ...linkedClients]);
     } catch (error) {
       console.error("Error loading clients:", error);
     }
@@ -284,6 +282,21 @@ const Projects = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
+
+      // For new projects: Real-time server-side limit check to prevent bypass via refresh
+      if (!editingProject && !hasActiveSubscription) {
+        const { count: currentProjectCount } = await supabase
+          .from("projects")
+          .select("*", { count: "exact", head: true })
+          .eq("created_by", session.user.id);
+
+        const FREE_TIER_LIMIT = 3;
+        if ((currentProjectCount || 0) >= FREE_TIER_LIMIT) {
+          setLimitDialogOpen(true);
+          refreshLimits(); // Sync the client state
+          return;
+        }
+      }
 
       // Logic to resolve linked editor/client IDs to actual table IDs
       let processedFormData = { ...formData };
@@ -525,6 +538,7 @@ const Projects = () => {
       setEditingProject(null);
       setParentProjectId(null);
       loadProjects();
+      refreshLimits(); // Refresh limits after create/update
     } catch (error: any) {
       toast.error("Failed to save project");
       console.error(error);
@@ -549,6 +563,7 @@ const Projects = () => {
       if (error) throw error;
       setProjects(projects.filter(p => p.id !== projectId));
       toast.success("Project deleted successfully");
+      refreshLimits(); // Refresh limits after delete
     } catch (error) {
       toast.error("Failed to delete project");
     }
@@ -600,12 +615,44 @@ const Projects = () => {
     navigate(`/projects/${projectId}`);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen">
+        <AppSidebar />
+        <div className="flex-1 bg-background dark:bg-background">
+          <header className="border-b bg-card/50 dark:bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-3 sm:gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto">
+                <SidebarTrigger />
+                <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                    <Video className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                  </div>
+                  <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Projects</h1>
+                </div>
+              </div>
+            </div>
+          </header>
+          <main className="px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+            <div className="mb-4 sm:mb-6 lg:mb-8">
+              <h2 className="text-lg sm:text-xl lg:text-2xl font-bold mb-1 sm:mb-2">Your Projects</h2>
+              <p className="text-xs sm:text-sm text-muted-foreground">Loading your projects...</p>
+            </div>
+            {/* Skeleton table */}
+            <div className="space-y-3">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-16 bg-muted/50 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          </main>
+        </div>
       </div>
-    );
+    </SidebarProvider>
+  );
+
+  if (loading) {
+    return <LoadingSkeleton />;
   }
 
   return (

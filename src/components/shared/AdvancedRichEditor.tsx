@@ -124,14 +124,14 @@ const AdvancedRichEditor: React.FC<AdvancedRichEditorProps> = ({
         }),
         TableHeader.configure({
             HTMLAttributes: {
-                class: 'border-2 border-gray-400 px-3 py-2 bg-blue-50 font-semibold text-left',
+                class: 'border-2 border-gray-400 px-3 py-2 bg-success/10 font-semibold text-left',
             },
         }),
         Image,
         Link.configure({
             openOnClick: false,
             HTMLAttributes: {
-                class: 'text-blue-500 underline cursor-pointer',
+                class: 'text-success underline cursor-pointer',
             }
         }),
     ], []);
@@ -248,7 +248,7 @@ const AdvancedRichEditor: React.FC<AdvancedRichEditorProps> = ({
     }
 
     return (
-        <div className="border rounded-lg overflow-hidden bg-card h-full flex flex-col">
+        <div className="border-0 rounded-none sm:border sm:rounded-lg overflow-hidden bg-card h-full flex flex-col dark:bg-card">
             {/* Toolbar - Organized in rows */}
             <div className="border-b bg-muted/30 overflow-x-auto flex-shrink-0">
                 {/* Row 1: History & Style */}
@@ -454,7 +454,7 @@ const AdvancedRichEditor: React.FC<AdvancedRichEditorProps> = ({
                 <EditorContent editor={editor} className="h-full" />
                 <style>{`
           .ProseMirror {
-            padding: 0.75rem;
+            padding: 1rem;
             min-height: 100%;
             height: auto;
             outline: none;

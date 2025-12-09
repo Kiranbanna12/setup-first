@@ -136,32 +136,34 @@ export default function AddAdvanceDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Add Advance Payment</DialogTitle>
-                    <DialogDescription>Record an advance payment given to an editor or client</DialogDescription>
+            <DialogContent className="sm:max-w-md max-w-[calc(100vw-2rem)] mx-4 max-h-[90vh] overflow-y-auto">
+                <DialogHeader className="pb-2">
+                    <DialogTitle className="text-base sm:text-lg">Add Advance Payment</DialogTitle>
+                    <DialogDescription className="text-xs sm:text-sm">
+                        Record an advance payment given to an editor or client
+                    </DialogDescription>
                 </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
                     {/* Recipient Type */}
-                    <div className="space-y-2">
-                        <Label>Recipient Type *</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                        <Label className="text-xs sm:text-sm">Recipient Type *</Label>
                         <Select
                             value={formData.recipientType}
                             onValueChange={(value) => setFormData({ ...formData, recipientType: value, recipientId: "" })}
                             disabled={subscriptionTier !== 'agency'} // Lock if not agency
                         >
-                            <SelectTrigger>
+                            <SelectTrigger className="h-9 sm:h-10 text-xs sm:text-sm">
                                 <SelectValue placeholder="Select type" />
                             </SelectTrigger>
                             <SelectContent>
                                 {/* Agency Plan (or admin) can see both */}
                                 {(subscriptionTier === 'agency' || userCategory === 'agency' || userCategory === 'client') && (
-                                    <SelectItem value="editor">Editor</SelectItem>
+                                    <SelectItem value="editor" className="text-xs sm:text-sm">Editor</SelectItem>
                                 )}
 
                                 {/* Agency Plan, Editor, or Admin can see Client */}
                                 {(subscriptionTier === 'agency' || userCategory === 'agency' || userCategory === 'editor') && (
-                                    <SelectItem value="client">Client</SelectItem>
+                                    <SelectItem value="client" className="text-xs sm:text-sm">Client</SelectItem>
                                 )}
                             </SelectContent>
                         </Select>
@@ -169,18 +171,20 @@ export default function AddAdvanceDialog({
 
                     {/* Recipient Selection */}
                     {formData.recipientType && (
-                        <div className="space-y-2">
-                            <Label>Select {formData.recipientType === "editor" ? "Editor" : "Client"} *</Label>
+                        <div className="space-y-1.5 sm:space-y-2">
+                            <Label className="text-xs sm:text-sm">
+                                Select {formData.recipientType === "editor" ? "Editor" : "Client"} *
+                            </Label>
                             <Select
                                 value={formData.recipientId}
                                 onValueChange={(value) => setFormData({ ...formData, recipientId: value })}
                             >
-                                <SelectTrigger>
+                                <SelectTrigger className="h-9 sm:h-10 text-xs sm:text-sm">
                                     <SelectValue placeholder={`Select ${formData.recipientType}`} />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {getRecipients().map((recipient) => (
-                                        <SelectItem key={recipient.id} value={recipient.id}>
+                                        <SelectItem key={recipient.id} value={recipient.id} className="text-xs sm:text-sm">
                                             {recipient.full_name}
                                         </SelectItem>
                                     ))}
@@ -190,8 +194,8 @@ export default function AddAdvanceDialog({
                     )}
 
                     {/* Amount */}
-                    <div className="space-y-2">
-                        <Label htmlFor="amount">Amount (₹) *</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                        <Label htmlFor="amount" className="text-xs sm:text-sm">Amount (₹) *</Label>
                         <Input
                             id="amount"
                             type="number"
@@ -201,39 +205,48 @@ export default function AddAdvanceDialog({
                             value={formData.amount}
                             onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                             required
+                            className="h-9 sm:h-10 text-xs sm:text-sm"
                         />
                     </div>
 
                     {/* Description */}
-                    <div className="space-y-2">
-                        <Label htmlFor="description">Description / Reason</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                        <Label htmlFor="description" className="text-xs sm:text-sm">Description / Reason</Label>
                         <Textarea
                             id="description"
                             placeholder="e.g., Advance for project work, Travel expense, etc."
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                             rows={2}
+                            className="text-xs sm:text-sm resize-none"
                         />
                     </div>
 
                     {/* Date */}
-                    <div className="space-y-2">
-                        <Label htmlFor="advanceDate">Date</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                        <Label htmlFor="advanceDate" className="text-xs sm:text-sm">Date</Label>
                         <Input
                             id="advanceDate"
                             type="date"
                             value={formData.advanceDate}
                             onChange={(e) => setFormData({ ...formData, advanceDate: e.target.value })}
+                            className="h-9 sm:h-10 text-xs sm:text-sm"
                         />
                     </div>
 
-                    <DialogFooter className="pt-4">
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                    <DialogFooter className="pt-3 sm:pt-4 flex-col-reverse sm:flex-row gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => onOpenChange(false)}
+                            className="w-full sm:w-auto h-9 sm:h-10 text-xs sm:text-sm"
+                        >
                             Cancel
                         </Button>
                         <Button
                             type="submit"
                             disabled={loading || !formData.recipientType || !formData.recipientId || !formData.amount}
+                            className="w-full sm:w-auto h-9 sm:h-10 text-xs sm:text-sm"
                         >
                             {loading ? "Adding..." : "Add Advance"}
                         </Button>

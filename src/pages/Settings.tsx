@@ -44,6 +44,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const { theme, setTheme, isDark } = useTheme();
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [profile, setProfile] = useState<any>(null);
 
   // Security
@@ -78,6 +79,13 @@ export default function Settings() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Active Subscription
+  const [activeSubscription, setActiveSubscription] = useState<{
+    plan_name: string;
+    tier: string;
+    status: string;
+  } | null>(null);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -102,6 +110,28 @@ export default function Settings() {
         // Load 2FA setting from profile
         setTwoFactorEnabled(profileData?.two_factor_enabled || false);
 
+        // Load active subscription with plan details
+        const { data: subData } = await supabase
+          .from('user_subscriptions' as any)
+          .select(`
+            status,
+            subscription_plans!inner(name, tier)
+          `)
+          .eq('user_id', user.id)
+          .in('status', ['active', 'created', 'pending', 'cancelling'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (subData && subData.length > 0) {
+          const sub = subData[0] as any;
+          setActiveSubscription({
+            plan_name: sub.subscription_plans?.name || 'Unknown',
+            tier: sub.subscription_plans?.tier || 'basic',
+            status: sub.status
+          });
+        } else {
+          setActiveSubscription(null);
+        }
 
         // Load General Settings
         if (profileData?.general_settings) {
@@ -125,6 +155,8 @@ export default function Settings() {
     } catch (error) {
       console.error("Load data error:", error);
       navigate("/auth");
+    } finally {
+      setInitialLoading(false);
     }
   };
 
@@ -284,6 +316,72 @@ export default function Settings() {
 
   const passwordStrength = getPasswordStrength(newPassword);
 
+  // Skeleton loading component for faster perceived loading
+  const LoadingSkeleton = () => (
+    <SidebarProvider>
+      <div className="flex w-full min-h-screen bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <header className="flex-shrink-0 border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+            <div className="flex items-center px-3 sm:px-4 lg:px-6 py-3 sm:py-4 gap-2 sm:gap-4">
+              <SidebarTrigger />
+              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-primary flex items-center justify-center shadow-glow flex-shrink-0">
+                  <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold truncate">Settings</h1>
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 overflow-y-auto">
+            <div className="px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8 max-w-6xl mx-auto w-full">
+              <div className="grid gap-4 sm:gap-6">
+                {/* Profile card skeleton */}
+                <Card className="shadow-elegant border-2">
+                  <CardContent className="pt-4 sm:pt-6">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-muted/50 animate-pulse" />
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                        <div className="h-4 w-48 bg-muted/40 rounded animate-pulse" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Settings cards skeleton */}
+                {[1, 2, 3, 4].map((i) => (
+                  <Card key={i} className="shadow-elegant">
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 bg-muted/50 rounded animate-pulse" />
+                        <div className="h-5 w-32 bg-muted/50 rounded animate-pulse" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {[1, 2, 3].map((j) => (
+                        <div key={j} className="flex items-center justify-between">
+                          <div className="space-y-2">
+                            <div className="h-4 w-28 bg-muted/40 rounded animate-pulse" />
+                            <div className="h-3 w-40 bg-muted/30 rounded animate-pulse" />
+                          </div>
+                          <div className="h-6 w-10 bg-muted/40 rounded-full animate-pulse" />
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+
+  if (initialLoading) {
+    return <LoadingSkeleton />;
+  }
+
   return (
     <SidebarProvider>
       <div className="flex w-full min-h-screen bg-background">
@@ -322,8 +420,8 @@ export default function Settings() {
                           <h2 className="text-base sm:text-lg font-bold truncate">{profile.full_name || "User"}</h2>
                           <p className="text-xs sm:text-sm text-muted-foreground truncate">{profile.email}</p>
                         </div>
-                        <Badge variant={profile.subscription_tier === 'pro' || profile.subscription_tier === 'premium' ? "default" : "secondary"} className="capitalize text-xs sm:text-sm">
-                          {(profile.subscription_tier === 'basic' || !profile.subscription_tier) ? "Free Plan" : profile.subscription_tier}
+                        <Badge variant={activeSubscription ? "default" : "secondary"} className="capitalize text-xs sm:text-sm">
+                          {activeSubscription ? activeSubscription.plan_name : "Free Plan"}
                         </Badge>
                       </div>
                     </CardContent>

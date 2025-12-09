@@ -428,8 +428,8 @@ export const UniversalVideoPlayer = forwardRef<any, UniversalVideoPlayerProps>(
       return (
         <div className="w-full aspect-video bg-muted flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg">
           <div className="text-center space-y-3 p-6">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
-              <svg className="w-8 h-8 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+            <div className="w-16 h-16 bg-success/20 rounded-full flex items-center justify-center mx-auto">
+              <svg className="w-8 h-8 text-success" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
               </svg>
             </div>
@@ -530,7 +530,7 @@ export const UniversalVideoPlayer = forwardRef<any, UniversalVideoPlayerProps>(
               <div className="flex items-center gap-2">
                 {/* Speed indicator when not 1x */}
                 {playbackSpeed !== 1 && (
-                  <span className="text-white text-xs bg-blue-600/80 px-2 py-1 rounded">
+                  <span className="text-white text-xs bg-success/80 px-2 py-1 rounded">
                     {playbackSpeed}x
                   </span>
                 )}

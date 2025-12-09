@@ -203,9 +203,39 @@ export default function AdminPlans() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
+      <AdminLayout title="Subscription Plans" description="Manage pricing and features">
+        <div className="max-w-7xl space-y-6">
+          <div className="flex justify-end">
+            <div className="h-10 w-32 bg-muted/50 rounded animate-pulse" />
+          </div>
+          <div className="space-y-8">
+            {[1, 2].map((section) => (
+              <div key={section}>
+                <div className="h-7 w-40 bg-muted/50 rounded animate-pulse mb-4" />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {[1, 2, 3].map((i) => (
+                    <Card key={i} className="shadow-elegant">
+                      <CardHeader>
+                        <div className="h-6 w-32 bg-muted/50 rounded animate-pulse" />
+                        <div className="h-5 w-24 bg-muted/40 rounded animate-pulse mt-2" />
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {[1, 2, 3].map((j) => (
+                          <div key={j} className="h-4 w-full bg-muted/30 rounded animate-pulse" />
+                        ))}
+                        <div className="grid grid-cols-2 gap-2 pt-4">
+                          <div className="h-9 bg-muted/40 rounded animate-pulse" />
+                          <div className="h-9 bg-muted/40 rounded animate-pulse" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </AdminLayout>
     );
   }
 
@@ -261,11 +291,11 @@ export default function AdminPlans() {
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <p className="text-muted-foreground">Projects:</p>
-                          <p className="font-medium">{plan.project_limit || "Unlimited"}</p>
+                          <p className="font-medium">{plan.project_limit === null ? "Unlimited" : plan.project_limit}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Storage:</p>
-                          <p className="font-medium">{plan.storage_limit ? `${plan.storage_limit}GB` : "Unlimited"}</p>
+                          <p className="font-medium">{plan.storage_limit !== null ? `${plan.storage_limit}GB` : "Unlimited"}</p>
                         </div>
                       </div>
 

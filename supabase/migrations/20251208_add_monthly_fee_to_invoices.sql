@@ -1,0 +1,2 @@
+ALTER TABLE public.invoices 
+ADD COLUMN IF NOT EXISTS monthly_fee DECIMAL(10, 2) DEFAULT 0;

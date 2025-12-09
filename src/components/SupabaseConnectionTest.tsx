@@ -19,7 +19,7 @@ export function SupabaseConnectionTest() {
         // Test basic connection
         // @ts-ignore - System table access
         const { data, error } = await (supabase as any).from('profiles').select('*').limit(1);
-        
+
         if (error) {
           console.error('Connection test error:', error);
           setErrorMessage(error.message);
@@ -51,8 +51,8 @@ export function SupabaseConnectionTest() {
         <CardTitle className="flex items-center gap-2">
           Supabase Connection Test
           {connectionStatus === 'testing' && <Loader2 className="h-4 w-4 animate-spin" />}
-          {connectionStatus === 'connected' && <CheckCircle className="h-4 w-4 text-green-500" />}
-          {connectionStatus === 'error' && <XCircle className="h-4 w-4 text-red-500" />}
+          {connectionStatus === 'connected' && <CheckCircle className="h-4 w-4 text-success" />}
+          {connectionStatus === 'error' && <XCircle className="h-4 w-4 text-destructive" />}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -62,7 +62,7 @@ export function SupabaseConnectionTest() {
             {connectionStatus}
           </Badge>
         </div>
-        
+
         {serverInfo && (
           <div className="space-y-2">
             <div className="text-sm">
