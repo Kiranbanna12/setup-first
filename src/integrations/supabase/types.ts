@@ -183,6 +183,125 @@ export type Database = {
           },
         ]
       }
+      email_configurations: {
+        Row: {
+          created_at: string
+          from_email: string
+          from_name: string | null
+          id: string
+          is_active: boolean | null
+          priority: number | null
+          provider: string
+          smtp_host: string | null
+          smtp_port: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          from_email: string
+          from_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          priority?: number | null
+          provider?: string
+          smtp_host?: string | null
+          smtp_port?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          from_email?: string
+          from_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          priority?: number | null
+          provider?: string
+          smtp_host?: string | null
+          smtp_port?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      email_logs: {
+        Row: {
+          body: string | null
+          configuration_id: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          recipient_email: string
+          recipient_user_id: string | null
+          sent_at: string | null
+          status: string | null
+          subject: string
+        }
+        Insert: {
+          body?: string | null
+          configuration_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          recipient_email: string
+          recipient_user_id?: string | null
+          sent_at?: string | null
+          status?: string | null
+          subject: string
+        }
+        Update: {
+          body?: string | null
+          configuration_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          recipient_email?: string
+          recipient_user_id?: string | null
+          sent_at?: string | null
+          status?: string | null
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_configuration_id_fkey"
+            columns: ["configuration_id"]
+            isOneToOne: false
+            referencedRelation: "email_configurations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_templates: {
+        Row: {
+          body_html: string
+          body_text: string | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          name: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          body_html: string
+          body_text?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          body_html?: string
+          body_text?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       feedback: {
         Row: {
           content: string
@@ -389,6 +508,50 @@ export type Database = {
           },
         ]
       }
+      notes: {
+        Row: {
+          content: string | null
+          created_at: string
+          id: string
+          is_favorite: boolean | null
+          project_id: string | null
+          tags: string[] | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          is_favorite?: boolean | null
+          project_id?: string | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          is_favorite?: boolean | null
+          project_id?: string | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_preferences: {
         Row: {
           created_at: string | null
@@ -551,6 +714,7 @@ export type Database = {
           created_at: string | null
           email: string | null
           full_name: string | null
+          general_settings: Json | null
           grace_period_end: string | null
           id: string
           is_trial: boolean | null
@@ -571,6 +735,7 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           full_name?: string | null
+          general_settings?: Json | null
           grace_period_end?: string | null
           id: string
           is_trial?: boolean | null
@@ -591,6 +756,7 @@ export type Database = {
           created_at?: string | null
           email?: string | null
           full_name?: string | null
+          general_settings?: Json | null
           grace_period_end?: string | null
           id?: string
           is_trial?: boolean | null
@@ -692,6 +858,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      push_tokens: {
+        Row: {
+          created_at: string
+          device_info: Json | null
+          device_type: string | null
+          id: string
+          is_active: boolean | null
+          token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_info?: Json | null
+          device_type?: string | null
+          id?: string
+          is_active?: boolean | null
+          token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_info?: Json | null
+          device_type?: string | null
+          id?: string
+          is_active?: boolean | null
+          token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       subscription_plans: {
         Row: {
@@ -826,6 +1025,63 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "subscription_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      video_feedback: {
+        Row: {
+          comment_text: string
+          created_at: string
+          id: string
+          is_resolved: boolean | null
+          project_id: string | null
+          timestamp_seconds: number | null
+          updated_at: string
+          user_email: string | null
+          user_id: string
+          user_name: string | null
+          version_id: string | null
+        }
+        Insert: {
+          comment_text: string
+          created_at?: string
+          id?: string
+          is_resolved?: boolean | null
+          project_id?: string | null
+          timestamp_seconds?: number | null
+          updated_at?: string
+          user_email?: string | null
+          user_id: string
+          user_name?: string | null
+          version_id?: string | null
+        }
+        Update: {
+          comment_text?: string
+          created_at?: string
+          id?: string
+          is_resolved?: boolean | null
+          project_id?: string | null
+          timestamp_seconds?: number | null
+          updated_at?: string
+          user_email?: string | null
+          user_id?: string
+          user_name?: string | null
+          version_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_feedback_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_feedback_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "video_versions"
             referencedColumns: ["id"]
           },
         ]
